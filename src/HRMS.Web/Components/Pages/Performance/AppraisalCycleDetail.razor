@@ -1,0 +1,125 @@
+@page "/appraisal-cycles/{CycleId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Performance
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@using HRMS.Domain.Enums
+@inject IAppraisalService AppraisalService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Detail Siklus Penilaian</PageTitle>
+
+<p><a href="/appraisal-cycles">&larr; Kembali ke Daftar Siklus</a></p>
+<h1>Penilaian Pegawai</h1>
+
+@if (!string.IsNullOrEmpty(_errorMessage))
+{
+    <div class="alert alert-danger">@_errorMessage</div>
+}
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_appraisals is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_appraisals.Count == 0)
+        {
+            <p class="text-muted">Belum ada penilaian untuk siklus ini.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Pegawai</th><th>Status</th><th>Rating Akhir</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var a in _appraisals)
+                    {
+                        <tr>
+                            <td>@a.EmployeeName</td>
+                            <td><span class="badge bg-@StatusBadge(a.Status)">@a.Status</span></td>
+                            <td>@(a.FinalRating?.ToString("0.0") ?? "-")</td>
+                            <td><a href="/appraisals/@a.Id" class="btn btn-sm btn-outline-secondary">Detail</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Tambah Penilaian Pegawai</h5>
+        @if (_employees is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Pegawai</label>
+                    <InputSelect class="form-select" @bind-Value="_model.EmployeeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName (@e.EmployeeNumber)</option>
+                        }
+                    </InputSelect>
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Tambahkan</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid CycleId { get; set; }
+
+    private List<AppraisalDto>? _appraisals;
+    private List<Employee>? _employees;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _appraisals = await AppraisalService.GetByCycleAsync(CycleId);
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        if (!Guid.TryParse(_model.EmployeeId, out var employeeId))
+        {
+            _errorMessage = "Pilih pegawai terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var result = await AppraisalService.CreateAsync(new CreateAppraisalRequest(employeeId, CycleId));
+
+        if (result.Succeeded)
+        {
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private static string StatusBadge(AppraisalStatus status) => status switch
+    {
+        AppraisalStatus.Completed => "success",
+        AppraisalStatus.SelfAssessmentSubmitted => "info",
+        _ => "warning"
+    };
+
+    private class FormModel
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+    }
+}

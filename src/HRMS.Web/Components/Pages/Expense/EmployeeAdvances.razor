@@ -1,0 +1,169 @@
+@page "/employee-advances"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Expense
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@using HRMS.Domain.Enums
+@inject IEmployeeAdvanceService EmployeeAdvanceService
+@inject IUnitOfWork UnitOfWork
+@inject ICurrentUserService CurrentUser
+@rendermode InteractiveServer
+
+<PageTitle>Advance Pegawai</PageTitle>
+
+<h1>Advance Pegawai</h1>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+}
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_advances is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_advances.Count == 0)
+        {
+            <p class="text-muted">Belum ada pengajuan advance.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Pegawai</th><th>Tujuan</th><th>Jumlah</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var a in _advances)
+                    {
+                        <tr>
+                            <td>@a.EmployeeName</td>
+                            <td>@a.PurposeDescription</td>
+                            <td>Rp @a.AdvanceAmount.ToString("N0")</td>
+                            <td><span class="badge bg-@StatusBadge(a.Status)">@a.Status</span></td>
+                            <td>
+                                @if (a.Status == EmployeeAdvanceStatus.Pending)
+                                {
+                                    <button class="btn btn-sm btn-success" disabled="@(!CurrentUser.EmployeeId.HasValue)" @onclick="() => Approve(a.Id)">Setujui</button>
+                                    <button class="btn btn-sm btn-outline-danger" disabled="@(!CurrentUser.EmployeeId.HasValue)" @onclick="() => Reject(a.Id)">Tolak</button>
+                                }
+                                else if (a.Status == EmployeeAdvanceStatus.Approved)
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => MarkPaid(a.Id)">Tandai Dibayar</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Ajukan Advance</h5>
+        @if (_employees is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Pegawai</label>
+                    <InputSelect class="form-select" @bind-Value="_model.EmployeeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Tujuan</label>
+                    <InputText class="form-control" @bind-Value="_model.PurposeDescription" placeholder="mis. Perjalanan dinas ke Surabaya" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Jumlah (Rp)</label>
+                    <InputNumber class="form-control" @bind-Value="_model.AdvanceAmount" />
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Ajukan</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private List<EmployeeAdvanceDto>? _advances;
+    private List<Employee>? _employees;
+    private string? _message;
+    private bool _isError;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _advances = await EmployeeAdvanceService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+
+        if (!Guid.TryParse(_model.EmployeeId, out var employeeId))
+        {
+            _isError = true;
+            _message = "Pilih pegawai terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var result = await EmployeeAdvanceService.CreateAsync(
+            new CreateEmployeeAdvanceRequest(employeeId, _model.PurposeDescription, _model.AdvanceAmount));
+
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Advance berhasil diajukan." : string.Join(" ", result.Errors);
+
+        if (result.Succeeded)
+        {
+            _model.PurposeDescription = string.Empty;
+            _model.AdvanceAmount = 0;
+            await LoadAsync();
+        }
+
+        _isSaving = false;
+    }
+
+    private async Task Approve(Guid id)
+    {
+        if (!CurrentUser.EmployeeId.HasValue) return;
+        await EmployeeAdvanceService.ApproveAsync(id, CurrentUser.EmployeeId.Value);
+        await LoadAsync();
+    }
+
+    private async Task Reject(Guid id)
+    {
+        if (!CurrentUser.EmployeeId.HasValue) return;
+        await EmployeeAdvanceService.RejectAsync(id, CurrentUser.EmployeeId.Value);
+        await LoadAsync();
+    }
+
+    private async Task MarkPaid(Guid id)
+    {
+        await EmployeeAdvanceService.MarkPaidAsync(id);
+        await LoadAsync();
+    }
+
+    private static string StatusBadge(EmployeeAdvanceStatus status) => status switch
+    {
+        EmployeeAdvanceStatus.Approved => "info",
+        EmployeeAdvanceStatus.Paid => "success",
+        EmployeeAdvanceStatus.Settled => "secondary",
+        EmployeeAdvanceStatus.Rejected => "danger",
+        _ => "warning"
+    };
+
+    private class FormModel
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public string PurposeDescription { get; set; } = string.Empty;
+        public decimal AdvanceAmount { get; set; }
+    }
+}

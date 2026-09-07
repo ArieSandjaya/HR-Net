@@ -1,0 +1,147 @@
+@page "/leave-allocations"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Leave
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@using HRMS.Domain.Entities.Leave
+@inject ILeaveAllocationService LeaveAllocationService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Alokasi Cuti</PageTitle>
+
+<h1>Alokasi Cuti</h1>
+<p class="text-muted">Berikan jatah cuti ke pegawai untuk suatu periode (mis. awal tahun). Tanpa alokasi, saldo cuti pegawai akan selalu 0.</p>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_allocations is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_allocations.Count == 0)
+        {
+            <p class="text-muted">Belum ada alokasi cuti.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Pegawai</th><th>Jenis Cuti</th><th>Periode</th><th>Jumlah Hari</th></tr></thead>
+                <tbody>
+                    @foreach (var a in _allocations)
+                    {
+                        <tr>
+                            <td>@a.EmployeeName</td>
+                            <td>@a.LeaveTypeName</td>
+                            <td>@a.FromDate.ToString("dd MMM yyyy") - @a.ToDate.ToString("dd MMM yyyy")</td>
+                            <td>@a.AllocatedDays</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Alokasikan Cuti Baru</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        @if (_employees is not null && _leaveTypes is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Pegawai</label>
+                    <InputSelect class="form-select" @bind-Value="_model.EmployeeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName (@e.EmployeeNumber)</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Jenis Cuti</label>
+                    <InputSelect class="form-select" @bind-Value="_model.LeaveTypeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var lt in _leaveTypes)
+                        {
+                            <option value="@lt.Id">@lt.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Dari Tanggal</label>
+                    <InputDate class="form-control" @bind-Value="_model.FromDate" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Sampai Tanggal</label>
+                    <InputDate class="form-control" @bind-Value="_model.ToDate" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Jumlah Hari</label>
+                    <InputNumber class="form-control" @bind-Value="_model.AllocatedDays" />
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Alokasikan</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private List<LeaveAllocationDto>? _allocations;
+    private List<Employee>? _employees;
+    private List<LeaveType>? _leaveTypes;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        _leaveTypes = await UnitOfWork.Repository<LeaveType>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _allocations = await LeaveAllocationService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        if (!Guid.TryParse(_model.EmployeeId, out var employeeId) || !Guid.TryParse(_model.LeaveTypeId, out var leaveTypeId))
+        {
+            _errorMessage = "Pilih pegawai dan jenis cuti terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var request = new AllocateLeaveRequest(
+            employeeId, leaveTypeId,
+            DateOnly.FromDateTime(_model.FromDate), DateOnly.FromDateTime(_model.ToDate), _model.AllocatedDays);
+
+        var result = await LeaveAllocationService.AllocateAsync(request);
+
+        if (result.Succeeded)
+        {
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public string LeaveTypeId { get; set; } = string.Empty;
+        public DateTime FromDate { get; set; } = new DateTime(DateTime.Today.Year, 1, 1);
+        public DateTime ToDate { get; set; } = new DateTime(DateTime.Today.Year, 12, 31);
+        public decimal AllocatedDays { get; set; } = 12;
+    }
+}

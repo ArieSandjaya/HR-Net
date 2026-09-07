@@ -1,0 +1,93 @@
+@page "/register-tenant"
+@using HRMS.Application.Tenancy
+@inject ITenantProvisioningService TenantProvisioningService
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Daftar Tenant Baru - HRMS</PageTitle>
+
+<div class="d-flex justify-content-center mt-5">
+    <div style="max-width: 480px; width: 100%;">
+        <h1 class="mb-2">Daftar Perusahaan Baru</h1>
+        <p class="text-muted mb-4">Membuat ruang kerja HRMS terpisah untuk perusahaan Anda (multi-tenant).</p>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+
+        <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+
+            <div class="mb-3">
+                <label class="form-label">Nama Perusahaan</label>
+                <InputText class="form-control" @bind-Value="_model.TenantName" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Kode Tenant (unik, contoh: ACME)</label>
+                <InputText class="form-control" @bind-Value="_model.TenantCode" />
+            </div>
+            <hr />
+            <p class="text-muted">Akun Administrator pertama:</p>
+            <div class="mb-3">
+                <label class="form-label">Nama Lengkap</label>
+                <InputText class="form-control" @bind-Value="_model.AdminFullName" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Email</label>
+                <InputText class="form-control" type="email" @bind-Value="_model.AdminEmail" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Password</label>
+                <InputText class="form-control" type="password" @bind-Value="_model.AdminPassword" />
+                <div class="form-text">Minimal 10 karakter, mengandung simbol.</div>
+            </div>
+
+            <button class="btn btn-primary w-100" type="submit" disabled="@_isSaving">
+                @(_isSaving ? "Memproses..." : "Buat Tenant")
+            </button>
+        </EditForm>
+
+        <p class="mt-3 text-center"><a href="/login">Sudah punya akun? Masuk</a></p>
+    </div>
+</div>
+
+@code {
+    private readonly FormModel _model = new();
+    private string? _errorMessage;
+    private bool _isSaving;
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        var request = new RegisterTenantRequest(
+            _model.TenantName, _model.TenantCode,
+            _model.AdminFullName, _model.AdminEmail, _model.AdminPassword);
+
+        var result = await TenantProvisioningService.RegisterTenantAsync(request);
+
+        if (result.Succeeded)
+        {
+            // Full page navigation (forceLoad) to /login, since login itself needs a fresh
+            // static-rendered request/response cycle to set the auth cookie.
+            Nav.NavigateTo("/login", forceLoad: true);
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string TenantName { get; set; } = string.Empty;
+        public string TenantCode { get; set; } = string.Empty;
+        public string AdminFullName { get; set; } = string.Empty;
+        public string AdminEmail { get; set; } = string.Empty;
+        public string AdminPassword { get; set; } = string.Empty;
+    }
+}

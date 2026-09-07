@@ -1,0 +1,119 @@
+@page "/salary-structures"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Payroll
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Organization
+@inject ISalaryStructureService SalaryStructureService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Struktur Gaji</PageTitle>
+
+<h1>Struktur Gaji</h1>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_structures is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_structures.Count == 0)
+        {
+            <p class="text-muted">Belum ada struktur gaji.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Nama</th><th>Perusahaan</th><th>Jumlah Komponen</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var s in _structures)
+                    {
+                        <tr>
+                            <td>@s.Name</td>
+                            <td>@s.CompanyName</td>
+                            <td>@s.Components.Count</td>
+                            <td><a href="/salary-structures/@s.Id" class="btn btn-sm btn-outline-secondary">Kelola Komponen</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Buat Struktur Gaji</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        @if (_companies is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Nama Struktur</label>
+                    <InputText class="form-control" @bind-Value="_model.Name" placeholder="mis. Struktur Staff Reguler" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Perusahaan</label>
+                    <InputSelect class="form-select" @bind-Value="_model.CompanyId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var c in _companies)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Buat</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private List<SalaryStructureDto>? _structures;
+    private List<Company>? _companies;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companies = await UnitOfWork.Repository<Company>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _structures = await SalaryStructureService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        if (!Guid.TryParse(_model.CompanyId, out var companyId))
+        {
+            _errorMessage = "Pilih perusahaan terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var result = await SalaryStructureService.CreateAsync(new CreateSalaryStructureRequest(_model.Name, companyId));
+
+        if (result.Succeeded)
+        {
+            _model.Name = string.Empty;
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string CompanyId { get; set; } = string.Empty;
+    }
+}

@@ -1,0 +1,146 @@
+@page "/employee-separations"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Separation
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@using HRMS.Domain.Enums
+@inject IEmployeeSeparationService EmployeeSeparationService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Exit &amp; Separation</PageTitle>
+
+<h1>Exit &amp; Separation</h1>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+}
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_separations is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_separations.Count == 0)
+        {
+            <p class="text-muted">Belum ada proses separation.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Pegawai</th><th>Tipe</th><th>Tgl Resign</th><th>Tgl Relieving</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var s in _separations)
+                    {
+                        <tr>
+                            <td><a href="/employee-separations/@s.Id">@s.EmployeeName</a></td>
+                            <td>@s.SeparationType</td>
+                            <td>@s.ResignationDate.ToString("dd MMM yyyy")</td>
+                            <td>@(s.RelievingDate?.ToString("dd MMM yyyy") ?? "-")</td>
+                            <td><span class="badge bg-@StatusBadge(s.Status)">@s.Status</span></td>
+                            <td><a href="/employee-separations/@s.Id" class="btn btn-sm btn-outline-secondary">Kelola</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Ajukan Separation</h5>
+        @if (_employees is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Pegawai</label>
+                    <InputSelect class="form-select" @bind-Value="_model.EmployeeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName (@e.EmployeeNumber)</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Tipe</label>
+                    <InputSelect class="form-select" @bind-Value="_model.SeparationType">
+                        <option value="@SeparationType.Resignation">Resignation</option>
+                        <option value="@SeparationType.Termination">Termination</option>
+                        <option value="@SeparationType.Retirement">Retirement</option>
+                        <option value="@SeparationType.EndOfContract">End of Contract</option>
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Tanggal Pengajuan</label>
+                    <InputDate class="form-control" @bind-Value="_model.ResignationDate" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Alasan</label>
+                    <InputTextArea class="form-control" @bind-Value="_model.Reason" rows="3" />
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Ajukan</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private List<EmployeeSeparationDto>? _separations;
+    private List<Employee>? _employees;
+    private string? _message;
+    private bool _isError;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _separations = await EmployeeSeparationService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+
+        if (!Guid.TryParse(_model.EmployeeId, out var employeeId))
+        {
+            _isError = true;
+            _message = "Pilih pegawai terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var result = await EmployeeSeparationService.CreateAsync(new CreateEmployeeSeparationRequest(
+            employeeId, DateOnly.FromDateTime(_model.ResignationDate), _model.Reason, _model.SeparationType));
+
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Pengajuan separation berhasil dibuat." : string.Join(" ", result.Errors);
+
+        if (result.Succeeded)
+        {
+            _model.Reason = null;
+            await LoadAsync();
+        }
+
+        _isSaving = false;
+    }
+
+    private static string StatusBadge(SeparationStatus status) => status switch
+    {
+        SeparationStatus.Completed => "secondary",
+        SeparationStatus.Approved => "info",
+        _ => "warning"
+    };
+
+    private class FormModel
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public SeparationType SeparationType { get; set; } = SeparationType.Resignation;
+        public DateTime ResignationDate { get; set; } = DateTime.Today;
+        public string? Reason { get; set; }
+    }
+}

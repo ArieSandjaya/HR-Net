@@ -1,0 +1,402 @@
+@page "/applicants/{ApplicantId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager,HR User")]
+@using HRMS.Application.Recruitment
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@using HRMS.Domain.Entities.Organization
+@using HRMS.Domain.Enums
+@inject IJobApplicantService JobApplicantService
+@inject IInterviewService InterviewService
+@inject IJobOfferService JobOfferService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Detail Pelamar</PageTitle>
+
+@if (_applicant is null)
+{
+    <p><em>Memuat...</em></p>
+}
+else
+{
+    <h1>@_applicant.ApplicantName</h1>
+    <p class="text-muted">@_applicant.Email &middot; @_applicant.Phone &middot; Melamar untuk <strong>@_applicant.JobOpeningTitle</strong></p>
+    <p><span class="badge bg-secondary">@_applicant.Status</span></p>
+
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+    }
+
+    <hr />
+    <h4>Interview</h4>
+
+    @if (_interviews is not null)
+    {
+        @foreach (var i in _interviews)
+        {
+            <div class="card mb-2">
+                <div class="card-body">
+                    <h6>@i.InterviewRound &mdash; @i.ScheduledOn.ToString("dd MMM yyyy HH:mm")</h6>
+                    <p class="mb-1">Pewawancara: @(i.InterviewerName ?? "-") &middot; Status: <span class="badge bg-@InterviewStatusBadge(i.Status)">@i.Status</span></p>
+                    @foreach (var f in i.Feedbacks)
+                    {
+                        <div class="border-start ps-2 mb-1">
+                            <small><strong>@f.InterviewerName</strong> — Rating @f.Rating/5 — @(f.Recommended ? "Direkomendasikan" : "Tidak direkomendasikan")</small>
+                            @if (!string.IsNullOrEmpty(f.Comments))
+                            {
+                                <div><small class="text-muted">@f.Comments</small></div>
+                            }
+                        </div>
+                    }
+                    @if (i.Status == InterviewStatus.Pending)
+                    {
+                        <button class="btn btn-sm btn-outline-primary mt-2" @onclick="() => ToggleFeedbackForm(i.Id)">
+                            Beri Feedback
+                        </button>
+                        @if (_feedbackFormInterviewId == i.Id)
+                        {
+                            <EditForm Model="_feedbackModel" OnValidSubmit="() => SubmitFeedbackAsync(i.Id)" class="mt-2">
+                                <div class="row g-2">
+                                    <div class="col-md-5">
+                                        <InputSelect class="form-select form-select-sm" @bind-Value="_feedbackModel.InterviewerEmployeeId">
+                                            <option value="">-- Pewawancara --</option>
+                                            @foreach (var e in _employees!)
+                                            {
+                                                <option value="@e.Id">@e.FullName</option>
+                                            }
+                                        </InputSelect>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <InputNumber class="form-control form-control-sm" @bind-Value="_feedbackModel.Rating" placeholder="Rating 1-5" />
+                                    </div>
+                                    <div class="col-md-4 form-check">
+                                        <InputCheckbox class="form-check-input" @bind-Value="_feedbackModel.Recommended" id="@($"rec{i.Id}")" />
+                                        <label class="form-check-label" for="@($"rec{i.Id}")">Rekomendasikan</label>
+                                    </div>
+                                    <div class="col-12">
+                                        <InputTextArea class="form-control form-control-sm" @bind-Value="_feedbackModel.Comments" placeholder="Komentar" rows="2" />
+                                    </div>
+                                    <div class="col-12">
+                                        <button class="btn btn-sm btn-primary" type="submit">Kirim</button>
+                                    </div>
+                                </div>
+                            </EditForm>
+                        }
+                    }
+                </div>
+            </div>
+        }
+    }
+
+    <button class="btn btn-outline-primary btn-sm" @onclick="() => _showScheduleForm = !_showScheduleForm">
+        + Jadwalkan Interview
+    </button>
+    @if (_showScheduleForm && _employees is not null)
+    {
+        <EditForm Model="_scheduleModel" OnValidSubmit="HandleScheduleInterview" class="mt-2" style="max-width: 500px;">
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <label class="form-label">Ronde</label>
+                    <InputText class="form-control" @bind-Value="_scheduleModel.InterviewRound" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Jadwal</label>
+                    <input type="datetime-local" class="form-control" @bind="_scheduleModel.ScheduledOn" />
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label">Pewawancara</label>
+                    <InputSelect class="form-select" @bind-Value="_scheduleModel.InterviewerEmployeeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-primary w-100" type="submit">Jadwalkan</button>
+                </div>
+            </div>
+        </EditForm>
+    }
+
+    <hr />
+    <h4>Job Offer</h4>
+
+    @if (_offer is null)
+    {
+        <button class="btn btn-outline-primary btn-sm" @onclick="() => _showOfferForm = !_showOfferForm">
+            + Buat Penawaran Kerja
+        </button>
+        @if (_showOfferForm && _designations is not null && _departments is not null)
+        {
+            <EditForm Model="_offerModel" OnValidSubmit="HandleCreateOffer" class="mt-2" style="max-width: 500px;">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label class="form-label">Jabatan</label>
+                        <InputSelect class="form-select" @bind-Value="_offerModel.DesignationId">
+                            <option value="">-- Pilih --</option>
+                            @foreach (var d in _designations)
+                            {
+                                <option value="@d.Id">@d.Name</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Departemen</label>
+                        <InputSelect class="form-select" @bind-Value="_offerModel.DepartmentId">
+                            <option value="">-- Pilih --</option>
+                            @foreach (var d in _departments)
+                            {
+                                <option value="@d.Id">@d.Name</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Rencana Tanggal Mulai</label>
+                        <InputDate class="form-control" @bind-Value="_offerModel.ExpectedJoiningDate" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Gaji Tahunan (IDR)</label>
+                        <InputNumber class="form-control" @bind-Value="_offerModel.AnnualCtc" />
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-primary" type="submit">Kirim Penawaran</button>
+                    </div>
+                </div>
+            </EditForm>
+        }
+    }
+    else
+    {
+        <p>
+            @_offer.DesignationName di @_offer.DepartmentName &middot;
+            Mulai @(_offer.ExpectedJoiningDate?.ToString("dd MMM yyyy") ?? "-") &middot;
+            Status: <span class="badge bg-@OfferStatusBadge(_offer.Status)">@_offer.Status</span>
+        </p>
+
+        @if (_offer.Status == JobOfferStatus.AwaitingResponse)
+        {
+            <button class="btn btn-success btn-sm" @onclick="() => RespondOfferAsync(true)">Kandidat Menerima</button>
+            <button class="btn btn-outline-danger btn-sm" @onclick="() => RespondOfferAsync(false)">Kandidat Menolak</button>
+        }
+        else if (_offer.Status == JobOfferStatus.Accepted && !_offer.CreatedEmployeeId.HasValue)
+        {
+            <button class="btn btn-outline-primary btn-sm" @onclick="() => _showConvertForm = !_showConvertForm">
+                Konversi Jadi Pegawai
+            </button>
+            @if (_showConvertForm && _employmentTypes is not null)
+            {
+                <p class="text-muted small mt-2">Perusahaan otomatis mengikuti departemen pada penawaran kerja (@_offer.DepartmentName).</p>
+                <EditForm Model="_convertModel" OnValidSubmit="HandleConvert" class="mt-2" style="max-width: 500px;">
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <label class="form-label">Tipe Kepegawaian</label>
+                            <InputSelect class="form-select" @bind-Value="_convertModel.EmploymentTypeId">
+                                <option value="">-- Pilih --</option>
+                                @foreach (var et in _employmentTypes)
+                                {
+                                    <option value="@et.Id">@et.Name</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Tanggal Bergabung</label>
+                            <InputDate class="form-control" @bind-Value="_convertModel.DateOfJoining" />
+                        </div>
+                        <div class="col-12">
+                            <button class="btn btn-primary" type="submit">Buat Data Pegawai</button>
+                        </div>
+                    </div>
+                </EditForm>
+            }
+        }
+        else if (_offer.CreatedEmployeeId.HasValue)
+        {
+            <div class="alert alert-success">
+                Sudah menjadi pegawai. <a href="/employees">Lihat di Data Pegawai</a>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public Guid ApplicantId { get; set; }
+
+    private JobApplicantDto? _applicant;
+    private List<InterviewDto>? _interviews;
+    private JobOfferDto? _offer;
+    private List<Employee>? _employees;
+    private List<Department>? _departments;
+    private List<Designation>? _designations;
+    private List<EmploymentType>? _employmentTypes;
+
+    private bool _showScheduleForm;
+    private bool _showOfferForm;
+    private bool _showConvertForm;
+    private Guid? _feedbackFormInterviewId;
+    private string? _message;
+    private bool _isError;
+
+    private readonly ScheduleModel _scheduleModel = new();
+    private readonly FeedbackModel _feedbackModel = new();
+    private readonly OfferModel _offerModel = new();
+    private readonly ConvertModel _convertModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        _departments = await UnitOfWork.Repository<Department>().GetAllAsync();
+        _designations = await UnitOfWork.Repository<Designation>().GetAllAsync();
+        _employmentTypes = await UnitOfWork.Repository<EmploymentType>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var applicants = await JobApplicantService.GetAllAsync();
+        _applicant = applicants.FirstOrDefault(a => a.Id == ApplicantId);
+        _interviews = await InterviewService.GetByApplicantAsync(ApplicantId);
+
+        var offers = await JobOfferService.GetAllAsync();
+        _offer = offers.FirstOrDefault(o => o.JobApplicantId == ApplicantId);
+    }
+
+    private void ToggleFeedbackForm(Guid interviewId) =>
+        _feedbackFormInterviewId = _feedbackFormInterviewId == interviewId ? null : interviewId;
+
+    private async Task HandleScheduleInterview()
+    {
+        var request = new ScheduleInterviewRequest(
+            ApplicantId, _scheduleModel.InterviewRound, _scheduleModel.ScheduledOn,
+            Guid.TryParse(_scheduleModel.InterviewerEmployeeId, out var interviewerId) ? interviewerId : null);
+
+        var result = await InterviewService.ScheduleAsync(request);
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Interview dijadwalkan." : string.Join(" ", result.Errors);
+        if (result.Succeeded)
+        {
+            _showScheduleForm = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task SubmitFeedbackAsync(Guid interviewId)
+    {
+        if (!Guid.TryParse(_feedbackModel.InterviewerEmployeeId, out var interviewerId))
+        {
+            _isError = true;
+            _message = "Pilih pewawancara terlebih dahulu.";
+            return;
+        }
+
+        var request = new SubmitInterviewFeedbackRequest(
+            interviewId, interviewerId, _feedbackModel.Rating, _feedbackModel.Comments, _feedbackModel.Recommended);
+
+        var result = await InterviewService.SubmitFeedbackAsync(request);
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Feedback tersimpan." : string.Join(" ", result.Errors);
+        if (result.Succeeded)
+        {
+            _feedbackFormInterviewId = null;
+            await LoadAsync();
+        }
+    }
+
+    private async Task HandleCreateOffer()
+    {
+        if (!Guid.TryParse(_offerModel.DesignationId, out var desigId) || !Guid.TryParse(_offerModel.DepartmentId, out var deptId))
+        {
+            _isError = true;
+            _message = "Pilih jabatan dan departemen terlebih dahulu.";
+            return;
+        }
+
+        var request = new CreateJobOfferRequest(ApplicantId, desigId, deptId, _offerModel.ExpectedJoiningDate, _offerModel.AnnualCtc);
+        var result = await JobOfferService.CreateAsync(request);
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Penawaran kerja terkirim." : string.Join(" ", result.Errors);
+        if (result.Succeeded)
+        {
+            _showOfferForm = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task RespondOfferAsync(bool accepted)
+    {
+        if (_offer is null) return;
+        var result = await JobOfferService.RespondAsync(_offer.Id, accepted);
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Respons tersimpan." : string.Join(" ", result.Errors);
+        if (result.Succeeded) await LoadAsync();
+    }
+
+    private async Task HandleConvert()
+    {
+        if (_offer is null) return;
+        if (!Guid.TryParse(_convertModel.EmploymentTypeId, out var employmentTypeId))
+        {
+            _isError = true;
+            _message = "Pilih tipe kepegawaian terlebih dahulu.";
+            return;
+        }
+
+        var result = await JobOfferService.ConvertToEmployeeAsync(
+            _offer.Id, employmentTypeId, DateOnly.FromDateTime(_convertModel.DateOfJoining));
+
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Pegawai baru berhasil dibuat." : string.Join(" ", result.Errors);
+        if (result.Succeeded)
+        {
+            _showConvertForm = false;
+            await LoadAsync();
+        }
+    }
+
+    private static string InterviewStatusBadge(InterviewStatus status) => status switch
+    {
+        InterviewStatus.Cleared => "success",
+        InterviewStatus.Rejected => "danger",
+        InterviewStatus.UnderReview => "warning",
+        _ => "secondary"
+    };
+
+    private static string OfferStatusBadge(JobOfferStatus status) => status switch
+    {
+        JobOfferStatus.Accepted => "success",
+        JobOfferStatus.Rejected => "danger",
+        JobOfferStatus.Withdrawn => "secondary",
+        _ => "warning"
+    };
+
+    private class ScheduleModel
+    {
+        public string InterviewRound { get; set; } = "Round 1";
+        public DateTime ScheduledOn { get; set; } = DateTime.Now.AddDays(1);
+        public string InterviewerEmployeeId { get; set; } = string.Empty;
+    }
+
+    private class FeedbackModel
+    {
+        public string InterviewerEmployeeId { get; set; } = string.Empty;
+        public int Rating { get; set; } = 3;
+        public string? Comments { get; set; }
+        public bool Recommended { get; set; }
+    }
+
+    private class OfferModel
+    {
+        public string DesignationId { get; set; } = string.Empty;
+        public string DepartmentId { get; set; } = string.Empty;
+        public DateOnly ExpectedJoiningDate { get; set; } = DateOnly.FromDateTime(DateTime.Today.AddDays(14));
+        public decimal? AnnualCtc { get; set; }
+    }
+
+    private class ConvertModel
+    {
+        public string EmploymentTypeId { get; set; } = string.Empty;
+        public DateTime DateOfJoining { get; set; } = DateTime.Today;
+    }
+}

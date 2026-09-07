@@ -1,0 +1,101 @@
+@page "/attendance/checkin"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Attendance
+@using HRMS.Application.Common.Interfaces
+@inject IAttendanceService AttendanceService
+@inject ICurrentUserService CurrentUser
+@rendermode InteractiveServer
+
+<PageTitle>Check-in / Check-out</PageTitle>
+
+<h1>Absensi Hari Ini</h1>
+
+@if (!EmployeeId.HasValue)
+{
+    <div class="alert alert-warning">
+        Akun Anda belum ditautkan ke data pegawai, sehingga tidak bisa melakukan check-in/check-out.
+        Hubungi HR untuk menautkan akun Anda ke data Employee.
+    </div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+    }
+
+    <div class="d-flex gap-2 mb-4">
+        <button class="btn btn-success btn-lg" disabled="@(_isCheckedIn || _isBusy)" @onclick="HandleCheckIn">
+            Check-in
+        </button>
+        <button class="btn btn-outline-danger btn-lg" disabled="@(!_isCheckedIn || _isBusy)" @onclick="HandleCheckOut">
+            Check-out
+        </button>
+    </div>
+
+    <h5>Riwayat Hari Ini</h5>
+    @if (_checkins is null)
+    {
+        <p><em>Memuat...</em></p>
+    }
+    else if (_checkins.Count == 0)
+    {
+        <p class="text-muted">Belum ada aktivitas check-in hari ini.</p>
+    }
+    else
+    {
+        <table class="table table-sm" style="max-width: 400px;">
+            <thead><tr><th>Waktu</th><th>Jenis</th></tr></thead>
+            <tbody>
+                @foreach (var c in _checkins)
+                {
+                    <tr>
+                        <td>@c.Timestamp.ToString("HH:mm:ss")</td>
+                        <td>@(c.IsCheckIn ? "Masuk" : "Pulang")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private Guid? EmployeeId => CurrentUser.EmployeeId;
+    private List<CheckinDto>? _checkins;
+    private bool _isCheckedIn;
+    private bool _isBusy;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (EmployeeId.HasValue)
+            await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _checkins = await AttendanceService.GetTodayCheckinsAsync(EmployeeId!.Value);
+        _isCheckedIn = _checkins.Count > 0 && _checkins[^1].IsCheckIn;
+    }
+
+    private async Task HandleCheckIn()
+    {
+        _isBusy = true;
+        var result = await AttendanceService.CheckInAsync(EmployeeId!.Value, null, null, "web");
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Berhasil check-in." : string.Join(" ", result.Errors);
+        if (result.Succeeded) await RefreshAsync();
+        _isBusy = false;
+    }
+
+    private async Task HandleCheckOut()
+    {
+        _isBusy = true;
+        var result = await AttendanceService.CheckOutAsync(EmployeeId!.Value, null, null, "web");
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Berhasil check-out." : string.Join(" ", result.Errors);
+        if (result.Succeeded) await RefreshAsync();
+        _isBusy = false;
+    }
+}

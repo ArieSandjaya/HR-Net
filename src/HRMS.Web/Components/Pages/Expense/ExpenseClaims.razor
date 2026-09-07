@@ -1,0 +1,215 @@
+@page "/expense-claims"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Expense
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@using HRMS.Domain.Enums
+@inject IExpenseClaimService ExpenseClaimService
+@inject IExpenseCategoryService ExpenseCategoryService
+@inject IUnitOfWork UnitOfWork
+@inject ICurrentUserService CurrentUser
+@rendermode InteractiveServer
+
+<PageTitle>Klaim Pengeluaran</PageTitle>
+
+<h1>Klaim Pengeluaran</h1>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+}
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_claims is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_claims.Count == 0)
+        {
+            <p class="text-muted">Belum ada klaim pengeluaran.</p>
+        }
+        else
+        {
+            @foreach (var c in _claims)
+            {
+                <div class="card mb-2">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <strong>@c.EmployeeName</strong> &middot; @c.ClaimDate.ToString("dd MMM yyyy")
+                                <div class="text-muted small">
+                                    @string.Join(", ", c.Details.Select(d => d.CategoryName))
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                <div>Rp @c.TotalAmount.ToString("N0")</div>
+                                <span class="badge bg-@StatusBadge(c.Status)">@c.Status</span>
+                            </div>
+                        </div>
+                        @if (c.Status == ExpenseClaimStatus.Pending)
+                        {
+                            <div class="mt-2">
+                                <button class="btn btn-sm btn-success" disabled="@(!CurrentUser.EmployeeId.HasValue)" @onclick="() => Approve(c.Id)">Setujui</button>
+                                <button class="btn btn-sm btn-outline-danger" disabled="@(!CurrentUser.EmployeeId.HasValue)" @onclick="() => Reject(c.Id)">Tolak</button>
+                            </div>
+                        }
+                        else if (c.Status == ExpenseClaimStatus.Rejected && !string.IsNullOrEmpty(c.RejectionReason))
+                        {
+                            <div class="text-danger small mt-1">Alasan: @c.RejectionReason</div>
+                        }
+                    </div>
+                </div>
+            }
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Ajukan Klaim Baru</h5>
+        @if (_employees is not null && _categories is not null)
+        {
+            <div class="mb-2">
+                <label class="form-label">Pegawai</label>
+                <select class="form-select" @bind="_selectedEmployeeId">
+                    <option value="">-- Pilih --</option>
+                    @foreach (var e in _employees)
+                    {
+                        <option value="@e.Id">@e.FullName</option>
+                    }
+                </select>
+            </div>
+
+            <table class="table table-sm">
+                <thead><tr><th>Kategori</th><th>Tanggal</th><th>Nominal</th><th></th></tr></thead>
+                <tbody>
+                    @for (var i = 0; i < _lines.Count; i++)
+                    {
+                        var index = i;
+                        <tr>
+                            <td>
+                                <select class="form-select form-select-sm" @bind="_lines[index].ExpenseCategoryId">
+                                    <option value="">--</option>
+                                    @foreach (var cat in _categories)
+                                    {
+                                        <option value="@cat.Id">@cat.Name</option>
+                                    }
+                                </select>
+                            </td>
+                            <td><input type="date" class="form-control form-control-sm" @bind="_lines[index].ExpenseDate" /></td>
+                            <td><input type="number" class="form-control form-control-sm" @bind="_lines[index].Amount" /></td>
+                            <td><button class="btn btn-sm btn-outline-danger" @onclick="() => _lines.RemoveAt(index)">&times;</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="AddLine">+ Tambah Item</button>
+
+            <p class="mt-2"><strong>Total: Rp @_lines.Sum(l => l.Amount).ToString("N0")</strong></p>
+
+            <button class="btn btn-primary" @onclick="HandleSubmit" disabled="@_isSaving">Ajukan Klaim</button>
+        }
+    </div>
+</div>
+
+@code {
+    private List<ExpenseClaimDto>? _claims;
+    private List<Employee>? _employees;
+    private List<ExpenseCategoryDto>? _categories;
+    private string _selectedEmployeeId = string.Empty;
+    private readonly List<LineModel> _lines = new();
+    private string? _message;
+    private bool _isError;
+    private bool _isSaving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        _categories = await ExpenseCategoryService.GetAllAsync();
+        AddLine();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _claims = await ExpenseClaimService.GetAllAsync();
+
+    private void AddLine() => _lines.Add(new LineModel { ExpenseDate = DateTime.Today });
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _message = null;
+
+        if (!Guid.TryParse(_selectedEmployeeId, out var employeeId))
+        {
+            _isError = true;
+            _message = "Pilih pegawai terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        // BUG FIX: a row that's partially filled (category picked but amount left at 0, or
+        // amount entered but category not picked) used to be silently dropped from the claim
+        // by the filter below — the employee would have no idea that item never got submitted.
+        // Only a completely blank row (freshly added, untouched) should be ignored silently.
+        var partiallyFilled = _lines.Any(l =>
+            (Guid.TryParse(l.ExpenseCategoryId, out _) && l.Amount <= 0) ||
+            (!Guid.TryParse(l.ExpenseCategoryId, out _) && l.Amount > 0));
+        if (partiallyFilled)
+        {
+            _isError = true;
+            _message = "Ada item pengeluaran yang belum lengkap (kategori atau nominal kosong). Lengkapi atau hapus baris tersebut sebelum mengajukan.";
+            _isSaving = false;
+            return;
+        }
+
+        var validLines = _lines.Where(l => Guid.TryParse(l.ExpenseCategoryId, out _) && l.Amount > 0).ToList();
+        var lineItems = validLines.Select(l => new ExpenseClaimLineItem(
+            Guid.Parse(l.ExpenseCategoryId), DateOnly.FromDateTime(l.ExpenseDate), l.Description, l.Amount)).ToList();
+
+        var result = await ExpenseClaimService.CreateAsync(new CreateExpenseClaimRequest(employeeId, lineItems));
+
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Klaim berhasil diajukan." : string.Join(" ", result.Errors);
+
+        if (result.Succeeded)
+        {
+            _lines.Clear();
+            AddLine();
+            await LoadAsync();
+        }
+
+        _isSaving = false;
+    }
+
+    private async Task Approve(Guid id)
+    {
+        if (!CurrentUser.EmployeeId.HasValue) return;
+        var result = await ExpenseClaimService.ApproveAsync(id, CurrentUser.EmployeeId.Value);
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Klaim disetujui." : string.Join(" ", result.Errors);
+        await LoadAsync();
+    }
+
+    private async Task Reject(Guid id)
+    {
+        if (!CurrentUser.EmployeeId.HasValue) return;
+        var result = await ExpenseClaimService.RejectAsync(id, CurrentUser.EmployeeId.Value, "Ditolak oleh atasan");
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Klaim ditolak." : string.Join(" ", result.Errors);
+        await LoadAsync();
+    }
+
+    private static string StatusBadge(ExpenseClaimStatus status) => status switch
+    {
+        ExpenseClaimStatus.Approved => "success",
+        ExpenseClaimStatus.Rejected => "danger",
+        _ => "warning"
+    };
+
+    private class LineModel
+    {
+        public string ExpenseCategoryId { get; set; } = string.Empty;
+        public DateTime ExpenseDate { get; set; } = DateTime.Today;
+        public string? Description { get; set; }
+        public decimal Amount { get; set; }
+    }
+}

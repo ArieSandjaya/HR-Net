@@ -1,0 +1,156 @@
+@page "/job-openings"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager,HR User")]
+@using HRMS.Application.Recruitment
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Organization
+@inject IJobOpeningService JobOpeningService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Lowongan Kerja</PageTitle>
+
+<h1>Lowongan Kerja</h1>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_openings is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_openings.Count == 0)
+        {
+            <p class="text-muted">Belum ada lowongan.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Posisi</th><th>Departemen</th><th>Pelamar</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var o in _openings)
+                    {
+                        <tr>
+                            <td>@o.JobTitle</td>
+                            <td>@o.DepartmentName</td>
+                            <td><a href="/job-openings/@o.Id/applicants">@o.ApplicantCount pelamar</a></td>
+                            <td><span class="badge bg-@(o.Status == HRMS.Domain.Enums.JobOpeningStatus.Open ? "success" : "secondary")">@o.Status</span></td>
+                            <td>
+                                @if (o.Status == HRMS.Domain.Enums.JobOpeningStatus.Open)
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => CloseAsync(o.Id)">Tutup</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Buka Lowongan Baru</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        @if (_departments is not null && _designations is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Posisi</label>
+                    <InputText class="form-control" @bind-Value="_model.JobTitle" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Departemen</label>
+                    <InputSelect class="form-select" @bind-Value="_model.DepartmentId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var d in _departments)
+                        {
+                            <option value="@d.Id">@d.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Jabatan</label>
+                    <InputSelect class="form-select" @bind-Value="_model.DesignationId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var d in _designations)
+                        {
+                            <option value="@d.Id">@d.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Jumlah Posisi</label>
+                    <InputNumber class="form-control" @bind-Value="_model.NumberOfPositions" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Deskripsi</label>
+                    <InputTextArea class="form-control" @bind-Value="_model.Description" rows="3" />
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Buka Lowongan</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private List<JobOpeningDto>? _openings;
+    private List<Department>? _departments;
+    private List<Designation>? _designations;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _departments = await UnitOfWork.Repository<Department>().GetAllAsync();
+        _designations = await UnitOfWork.Repository<Designation>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _openings = await JobOpeningService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        if (!Guid.TryParse(_model.DepartmentId, out var deptId) || !Guid.TryParse(_model.DesignationId, out var desigId))
+        {
+            _errorMessage = "Pilih departemen dan jabatan terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var request = new CreateJobOpeningRequest(_model.JobTitle, deptId, desigId, _model.Description, _model.NumberOfPositions, null);
+        var result = await JobOpeningService.CreateAsync(request);
+
+        if (result.Succeeded)
+        {
+            _model.JobTitle = string.Empty;
+            _model.Description = null;
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private async Task CloseAsync(Guid id)
+    {
+        await JobOpeningService.CloseAsync(id);
+        await LoadAsync();
+    }
+
+    private class FormModel
+    {
+        public string JobTitle { get; set; } = string.Empty;
+        public string DepartmentId { get; set; } = string.Empty;
+        public string DesignationId { get; set; } = string.Empty;
+        public int NumberOfPositions { get; set; } = 1;
+        public string? Description { get; set; }
+    }
+}

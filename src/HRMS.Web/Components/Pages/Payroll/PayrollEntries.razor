@@ -1,0 +1,132 @@
+@page "/payroll-entries"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Payroll
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Organization
+@inject IPayrollEntryService PayrollEntryService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Payroll</PageTitle>
+
+<h1>Payroll</h1>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_entries is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_entries.Count == 0)
+        {
+            <p class="text-muted">Belum ada payroll yang dijalankan.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Perusahaan</th><th>Periode</th><th>Jumlah Slip</th><th>Total Net Pay</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var e in _entries)
+                    {
+                        <tr>
+                            <td>@e.CompanyName</td>
+                            <td>@e.PeriodStart.ToString("dd MMM yyyy") - @e.PeriodEnd.ToString("dd MMM yyyy")</td>
+                            <td>@e.SalarySlipCount</td>
+                            <td>Rp @e.TotalNetPay.ToString("N0")</td>
+                            <td><a href="/payroll-entries/@e.Id" class="btn btn-sm btn-outline-secondary">Lihat Slip</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Jalankan Payroll</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        @if (_companies is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Perusahaan</label>
+                    <InputSelect class="form-select" @bind-Value="_model.CompanyId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var c in _companies)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Awal Periode</label>
+                    <InputDate class="form-control" @bind-Value="_model.PeriodStart" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Akhir Periode</label>
+                    <InputDate class="form-control" @bind-Value="_model.PeriodEnd" />
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">
+                    @(_isSaving ? "Memproses..." : "Jalankan Payroll")
+                </button>
+            </EditForm>
+            <p class="text-muted small mt-2">
+                Gaji pokok tiap pegawai otomatis diprorata berdasarkan hari Absent pada modul Attendance selama periode ini.
+            </p>
+        }
+    </div>
+</div>
+
+@code {
+    private List<PayrollEntryDto>? _entries;
+    private List<Company>? _companies;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companies = await UnitOfWork.Repository<Company>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _entries = await PayrollEntryService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        if (!Guid.TryParse(_model.CompanyId, out var companyId))
+        {
+            _errorMessage = "Pilih perusahaan terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var request = new CreatePayrollEntryRequest(
+            companyId, DateOnly.FromDateTime(_model.PeriodStart), DateOnly.FromDateTime(_model.PeriodEnd));
+
+        var result = await PayrollEntryService.RunPayrollAsync(request);
+
+        if (result.Succeeded)
+        {
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string CompanyId { get; set; } = string.Empty;
+        public DateTime PeriodStart { get; set; } = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        public DateTime PeriodEnd { get; set; } = new DateTime(DateTime.Today.Year, DateTime.Today.Month, DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month));
+    }
+}

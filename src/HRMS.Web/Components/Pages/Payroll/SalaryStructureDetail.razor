@@ -1,0 +1,153 @@
+@page "/salary-structures/{StructureId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Payroll
+@using HRMS.Domain.Enums
+@inject ISalaryStructureService SalaryStructureService
+@inject ISalaryComponentService SalaryComponentService
+@rendermode InteractiveServer
+
+<PageTitle>Detail Struktur Gaji</PageTitle>
+
+<p><a href="/salary-structures">&larr; Kembali ke Daftar Struktur Gaji</a></p>
+
+@if (_structure is null)
+{
+    <p><em>Memuat...</em></p>
+}
+else
+{
+    <h1>@_structure.Name</h1>
+    <p class="text-muted">@_structure.CompanyName</p>
+
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+    }
+
+    <table class="table table-striped" style="max-width: 600px;">
+        <thead><tr><th>Komponen</th><th>Tipe</th><th>Nilai</th></tr></thead>
+        <tbody>
+            @if (_structure.Components.Count == 0)
+            {
+                <tr><td colspan="3" class="text-muted">Belum ada komponen di struktur ini.</td></tr>
+            }
+            @foreach (var c in _structure.Components)
+            {
+                <tr>
+                    <td>@c.ComponentName</td>
+                    <td><span class="badge bg-@(c.ComponentType == SalaryComponentType.Earning ? "success" : "danger")">@c.ComponentType</span></td>
+                    <td>
+                        @(c.CalculationType == SalaryCalculationType.FixedAmount
+                            ? (c.AmountOverride?.ToString("N0") ?? "default")
+                            : $"{c.PercentageOverride?.ToString() ?? "default"}%")
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <h5 class="mt-4">Tambah Komponen ke Struktur Ini</h5>
+    @if (_availableComponents is not null)
+    {
+        @if (_availableComponents.Count == 0)
+        {
+            <p class="text-muted">Semua komponen gaji yang ada sudah ditambahkan ke struktur ini. <a href="/salary-components">Buat komponen baru</a>.</p>
+        }
+        else
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleAddComponent" style="max-width: 500px;">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <InputSelect class="form-select" @bind-Value="_model.SalaryComponentId" @bind-Value:after="OnComponentSelected">
+                            <option value="">-- Pilih Komponen --</option>
+                            @foreach (var c in _availableComponents)
+                            {
+                                <option value="@c.Id">@c.Name (@c.ComponentType)</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-md-4">
+                        @if (_selectedIsPercentage)
+                        {
+                            <InputNumber class="form-control" @bind-Value="_model.PercentageOverride" placeholder="Persen (opsional)" />
+                        }
+                        else
+                        {
+                            <InputNumber class="form-control" @bind-Value="_model.AmountOverride" placeholder="Nominal (opsional)" />
+                        }
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-primary w-100" type="submit">Tambah</button>
+                    </div>
+                </div>
+            </EditForm>
+        }
+    }
+}
+
+@code {
+    [Parameter] public Guid StructureId { get; set; }
+
+    private SalaryStructureDto? _structure;
+    private List<SalaryComponentDto>? _allComponents;
+    private List<SalaryComponentDto>? _availableComponents;
+    private bool _selectedIsPercentage;
+    private string? _message;
+    private bool _isError;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _allComponents = await SalaryComponentService.GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _structure = await SalaryStructureService.GetByIdAsync(StructureId);
+        _allComponents ??= await SalaryComponentService.GetAllAsync();
+
+        var usedIds = _structure?.Components.Select(c => c.SalaryComponentId).ToHashSet() ?? new HashSet<Guid>();
+        _availableComponents = _allComponents.Where(c => !usedIds.Contains(c.Id)).ToList();
+    }
+
+    private void OnComponentSelected()
+    {
+        if (Guid.TryParse(_model.SalaryComponentId, out var id))
+        {
+            var comp = _allComponents?.FirstOrDefault(c => c.Id == id);
+            _selectedIsPercentage = comp?.CalculationType == SalaryCalculationType.PercentageOfBasic;
+        }
+    }
+
+    private async Task HandleAddComponent()
+    {
+        if (!Guid.TryParse(_model.SalaryComponentId, out var componentId))
+        {
+            _isError = true;
+            _message = "Pilih komponen terlebih dahulu.";
+            return;
+        }
+
+        var request = new AddStructureComponentRequest(StructureId, componentId, _model.AmountOverride, _model.PercentageOverride);
+        var result = await SalaryStructureService.AddComponentAsync(request);
+
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Komponen ditambahkan." : string.Join(" ", result.Errors);
+
+        if (result.Succeeded)
+        {
+            _model.SalaryComponentId = string.Empty;
+            _model.AmountOverride = null;
+            _model.PercentageOverride = null;
+            await LoadAsync();
+        }
+    }
+
+    private class FormModel
+    {
+        public string SalaryComponentId { get; set; } = string.Empty;
+        public decimal? AmountOverride { get; set; }
+        public decimal? PercentageOverride { get; set; }
+    }
+}

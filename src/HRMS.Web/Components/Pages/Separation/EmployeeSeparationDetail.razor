@@ -1,0 +1,308 @@
+@page "/employee-separations/{SeparationId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Separation
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@using HRMS.Domain.Enums
+@inject IEmployeeSeparationService EmployeeSeparationService
+@inject IExitInterviewService ExitInterviewService
+@inject IFnFSettlementService FnFSettlementService
+@inject IUnitOfWork UnitOfWork
+@inject ICurrentUserService CurrentUser
+@rendermode InteractiveServer
+
+<PageTitle>Detail Separation</PageTitle>
+
+<p><a href="/employee-separations">&larr; Kembali ke Daftar Separation</a></p>
+
+@if (_separation is null)
+{
+    <p><em>Memuat...</em></p>
+}
+else
+{
+    <h1>@_separation.EmployeeName</h1>
+    <p class="text-muted">
+        @_separation.SeparationType &middot; Diajukan @_separation.ResignationDate.ToString("dd MMM yyyy")
+        &middot; Status: <span class="badge bg-@StatusBadge(_separation.Status)">@_separation.Status</span>
+    </p>
+    @if (!string.IsNullOrEmpty(_separation.Reason))
+    {
+        <p><em>"@_separation.Reason"</em></p>
+    }
+
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+    }
+
+    @if (_separation.Status == SeparationStatus.Pending)
+    {
+        @if (!CurrentUser.EmployeeId.HasValue)
+        {
+            <div class="alert alert-warning">Akun Anda belum ditautkan ke data pegawai, sehingga tidak bisa menyetujui separation.</div>
+        }
+        <h5>Setujui Separation</h5>
+        <EditForm Model="_approveModel" OnValidSubmit="HandleApprove" style="max-width: 400px;">
+            <div class="mb-2">
+                <label class="form-label">Tanggal Relieving (hari kerja terakhir)</label>
+                <InputDate class="form-control" @bind-Value="_approveModel.RelievingDate" />
+            </div>
+            <button class="btn btn-primary" type="submit" disabled="@(!CurrentUser.EmployeeId.HasValue)">Setujui</button>
+        </EditForm>
+    }
+    else if (_separation.Status == SeparationStatus.Approved)
+    {
+        <p><strong>Tanggal Relieving:</strong> @_separation.RelievingDate?.ToString("dd MMM yyyy") &middot; Disetujui oleh @_separation.ApprovedByName</p>
+        <button class="btn btn-primary btn-sm" @onclick="HandleComplete">Selesaikan Separation (Nonaktifkan Pegawai)</button>
+    }
+    else
+    {
+        <p class="text-success"><strong>Separation selesai.</strong> Tanggal Relieving: @_separation.RelievingDate?.ToString("dd MMM yyyy")</p>
+    }
+
+    <hr />
+    <h4>Exit Interview</h4>
+    @foreach (var i in _interviews)
+    {
+        <div class="card mb-2">
+            <div class="card-body">
+                <strong>@i.InterviewerName</strong> &middot; @i.InterviewDate.ToString("dd MMM yyyy")
+                @if (i.Rating.HasValue) { <span> &middot; Rating @i.Rating/5</span> }
+                @if (!string.IsNullOrEmpty(i.Feedback))
+                {
+                    <div class="text-muted small mt-1">@i.Feedback</div>
+                }
+            </div>
+        </div>
+    }
+
+    <button class="btn btn-outline-primary btn-sm" @onclick="() => _showInterviewForm = !_showInterviewForm">+ Catat Exit Interview</button>
+    @if (_showInterviewForm && _employees is not null)
+    {
+        <EditForm Model="_interviewModel" OnValidSubmit="HandleRecordInterview" class="mt-2" style="max-width: 500px;">
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <InputSelect class="form-select" @bind-Value="_interviewModel.InterviewerEmployeeId">
+                        <option value="">-- Pewawancara --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-3">
+                    <InputDate class="form-control" @bind-Value="_interviewModel.InterviewDate" />
+                </div>
+                <div class="col-md-3">
+                    <InputNumber class="form-control" @bind-Value="_interviewModel.Rating" placeholder="Rating 1-5" />
+                </div>
+                <div class="col-12">
+                    <InputTextArea class="form-control" @bind-Value="_interviewModel.Feedback" rows="2" placeholder="Feedback" />
+                </div>
+                <div class="col-12">
+                    <button class="btn btn-sm btn-primary" type="submit">Simpan</button>
+                </div>
+            </div>
+        </EditForm>
+    }
+
+    <hr />
+    <h4>Full &amp; Final Settlement</h4>
+    @if (_settlement is null)
+    {
+        <button class="btn btn-outline-primary btn-sm" @onclick="HandleGenerateSettlement">Generate Settlement</button>
+        <p class="text-muted small mt-2">Otomatis menghitung uang pengganti cuti (dari saldo cuti yang encashable) dan mengurangi advance yang belum diselesaikan.</p>
+    }
+    else
+    {
+        <table class="table table-sm" style="max-width: 600px;">
+            <tbody>
+                @foreach (var c in _settlement.Components)
+                {
+                    <tr>
+                        <td>@c.Description <span class="badge bg-@(c.ComponentType == SalaryComponentType.Earning ? "success" : "danger")">@c.ComponentType</span></td>
+                        <td class="text-end">@(c.ComponentType == SalaryComponentType.Deduction ? "- " : "")Rp @c.Amount.ToString("N0")</td>
+                    </tr>
+                }
+                <tr class="fw-bold table-active">
+                    <td>Net Payable</td>
+                    <td class="text-end">Rp @_settlement.NetPayable.ToString("N0")</td>
+                </tr>
+            </tbody>
+        </table>
+
+        @if (_settlement.Status == FnFStatus.Draft)
+        {
+            <button class="btn btn-outline-primary btn-sm" @onclick="() => _showComponentForm = !_showComponentForm">+ Tambah Item Manual</button>
+            @if (_showComponentForm)
+            {
+                <EditForm Model="_componentModel" OnValidSubmit="HandleAddComponent" class="mt-2" style="max-width: 500px;">
+                    <div class="row g-2">
+                        <div class="col-md-5">
+                            <InputText class="form-control" @bind-Value="_componentModel.Description" placeholder="mis. Ganti aset yang hilang" />
+                        </div>
+                        <div class="col-md-3">
+                            <InputSelect class="form-select" @bind-Value="_componentModel.ComponentType">
+                                <option value="@SalaryComponentType.Earning">Earning</option>
+                                <option value="@SalaryComponentType.Deduction">Deduction</option>
+                            </InputSelect>
+                        </div>
+                        <div class="col-md-3">
+                            <InputNumber class="form-control" @bind-Value="_componentModel.Amount" placeholder="Nominal" />
+                        </div>
+                        <div class="col-md-1">
+                            <button class="btn btn-sm btn-primary w-100" type="submit">+</button>
+                        </div>
+                    </div>
+                </EditForm>
+            }
+            <div class="mt-2">
+                <button class="btn btn-success btn-sm" @onclick="HandleFinalize">Finalisasi Settlement</button>
+            </div>
+        }
+        else
+        {
+            <p class="text-success">Settlement sudah difinalisasi.</p>
+        }
+    }
+}
+
+@code {
+    [Parameter] public Guid SeparationId { get; set; }
+
+    private EmployeeSeparationDto? _separation;
+    private List<ExitInterviewDto> _interviews = new();
+    private FullAndFinalSettlementDto? _settlement;
+    private List<Employee>? _employees;
+    private bool _showInterviewForm;
+    private bool _showComponentForm;
+    private string? _message;
+    private bool _isError;
+
+    private readonly ApproveModel _approveModel = new();
+    private readonly InterviewModel _interviewModel = new();
+    private readonly ComponentModel _componentModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _separation = await EmployeeSeparationService.GetByIdAsync(SeparationId);
+        _interviews = await ExitInterviewService.GetBySeparationAsync(SeparationId);
+        _settlement = await FnFSettlementService.GetBySeparationAsync(SeparationId);
+    }
+
+    private async Task HandleApprove()
+    {
+        if (!CurrentUser.EmployeeId.HasValue)
+        {
+            _isError = true;
+            _message = "Akun Anda belum ditautkan ke data pegawai.";
+            return;
+        }
+
+        var result = await EmployeeSeparationService.ApproveAsync(new ApproveSeparationRequest(
+            SeparationId, CurrentUser.EmployeeId.Value, DateOnly.FromDateTime(_approveModel.RelievingDate)));
+
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Separation disetujui." : string.Join(" ", result.Errors);
+        if (result.Succeeded) await LoadAsync();
+    }
+
+    private async Task HandleComplete()
+    {
+        var result = await EmployeeSeparationService.CompleteAsync(SeparationId);
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Separation selesai. Pegawai telah dinonaktifkan." : string.Join(" ", result.Errors);
+        if (result.Succeeded) await LoadAsync();
+    }
+
+    private async Task HandleRecordInterview()
+    {
+        if (!Guid.TryParse(_interviewModel.InterviewerEmployeeId, out var interviewerId))
+        {
+            _isError = true;
+            _message = "Pilih pewawancara terlebih dahulu.";
+            return;
+        }
+
+        var result = await ExitInterviewService.RecordAsync(new RecordExitInterviewRequest(
+            SeparationId, interviewerId, _interviewModel.InterviewDate, _interviewModel.Feedback, _interviewModel.Rating));
+
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Exit interview tercatat." : string.Join(" ", result.Errors);
+        if (result.Succeeded)
+        {
+            _showInterviewForm = false;
+            await LoadAsync();
+        }
+    }
+
+    private async Task HandleGenerateSettlement()
+    {
+        var result = await FnFSettlementService.GenerateAsync(SeparationId);
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Settlement berhasil dibuat." : string.Join(" ", result.Errors);
+        if (result.Succeeded) await LoadAsync();
+    }
+
+    private async Task HandleAddComponent()
+    {
+        if (_settlement is null) return;
+
+        var result = await FnFSettlementService.AddComponentAsync(new AddFnFComponentRequest(
+            _settlement.Id, _componentModel.Description, _componentModel.ComponentType, _componentModel.Amount));
+
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Item ditambahkan." : string.Join(" ", result.Errors);
+        if (result.Succeeded)
+        {
+            _showComponentForm = false;
+            _componentModel.Description = string.Empty;
+            _componentModel.Amount = 0;
+            await LoadAsync();
+        }
+    }
+
+    private async Task HandleFinalize()
+    {
+        if (_settlement is null) return;
+
+        var result = await FnFSettlementService.FinalizeAsync(_settlement.Id);
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Settlement difinalisasi." : string.Join(" ", result.Errors);
+        if (result.Succeeded) await LoadAsync();
+    }
+
+    private static string StatusBadge(SeparationStatus status) => status switch
+    {
+        SeparationStatus.Completed => "secondary",
+        SeparationStatus.Approved => "info",
+        _ => "warning"
+    };
+
+    private class ApproveModel
+    {
+        public DateTime RelievingDate { get; set; } = DateTime.Today;
+    }
+
+    private class InterviewModel
+    {
+        public string InterviewerEmployeeId { get; set; } = string.Empty;
+        public DateTime InterviewDate { get; set; } = DateTime.Today;
+        public int Rating { get; set; } = 3;
+        public string? Feedback { get; set; }
+    }
+
+    private class ComponentModel
+    {
+        public string Description { get; set; } = string.Empty;
+        public SalaryComponentType ComponentType { get; set; } = SalaryComponentType.Deduction;
+        public decimal Amount { get; set; }
+    }
+}

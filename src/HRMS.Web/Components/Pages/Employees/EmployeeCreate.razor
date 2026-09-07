@@ -1,0 +1,197 @@
+@page "/employees/new"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Employees
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Organization
+@using HRMS.Domain.Enums
+@inject IEmployeeService EmployeeService
+@inject IUnitOfWork UnitOfWork
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Tambah Pegawai</PageTitle>
+
+<h1>Tambah Pegawai Baru</h1>
+
+@if (_companies is null)
+{
+    <p><em>Memuat data referensi...</em></p>
+}
+else if (_companies.Count == 0)
+{
+    <div class="alert alert-warning">
+        Belum ada data <strong>Company</strong>/<strong>Department</strong>/<strong>Designation</strong>/<strong>Employment Type</strong>.
+        Tambahkan data referensi tersebut terlebih dahulu (lihat modul HR Setup) sebelum membuat pegawai.
+    </div>
+}
+else
+{
+    <EditForm Model="_model" OnValidSubmit="HandleSubmit" class="row g-3" style="max-width: 720px;">
+        <DataAnnotationsValidator />
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="col-12"><div class="alert alert-danger">@_errorMessage</div></div>
+        }
+
+        <div class="col-md-4">
+            <label class="form-label">Nama Depan</label>
+            <InputText class="form-control" @bind-Value="_model.FirstName" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Nama Tengah</label>
+            <InputText class="form-control" @bind-Value="_model.MiddleName" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Nama Belakang</label>
+            <InputText class="form-control" @bind-Value="_model.LastName" />
+        </div>
+
+        <div class="col-md-6">
+            <label class="form-label">Email</label>
+            <InputText class="form-control" @bind-Value="_model.Email" type="email" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Nomor HP</label>
+            <InputText class="form-control" @bind-Value="_model.MobileNumber" />
+        </div>
+
+        <div class="col-md-4">
+            <label class="form-label">Tanggal Lahir</label>
+            <InputDate class="form-control" @bind-Value="_model.DateOfBirth" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Tanggal Bergabung</label>
+            <InputDate class="form-control" @bind-Value="_model.DateOfJoining" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Jenis Kelamin</label>
+            <InputSelect class="form-select" @bind-Value="_model.Gender">
+                @foreach (var g in Enum.GetValues<Gender>())
+                {
+                    <option value="@g">@g</option>
+                }
+            </InputSelect>
+        </div>
+
+        <div class="col-md-6">
+            <label class="form-label">Perusahaan</label>
+            <InputSelect class="form-select" @bind-Value="_model.CompanyId">
+                <option value="">-- Pilih --</option>
+                @foreach (var c in _companies!)
+                {
+                    <option value="@c.Id">@c.Name</option>
+                }
+            </InputSelect>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Tipe Kepegawaian</label>
+            <InputSelect class="form-select" @bind-Value="_model.EmploymentTypeId">
+                <option value="">-- Pilih --</option>
+                @foreach (var et in _employmentTypes!)
+                {
+                    <option value="@et.Id">@et.Name</option>
+                }
+            </InputSelect>
+        </div>
+
+        <div class="col-md-6">
+            <label class="form-label">Departemen</label>
+            <InputSelect class="form-select" @bind-Value="_model.DepartmentId">
+                <option value="">-- Pilih --</option>
+                @foreach (var d in _departments!)
+                {
+                    <option value="@d.Id">@d.Name</option>
+                }
+            </InputSelect>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Jabatan</label>
+            <InputSelect class="form-select" @bind-Value="_model.DesignationId">
+                <option value="">-- Pilih --</option>
+                @foreach (var d in _designations!)
+                {
+                    <option value="@d.Id">@d.Name</option>
+                }
+            </InputSelect>
+        </div>
+
+        <div class="col-12 mt-4">
+            <button type="submit" class="btn btn-primary" disabled="@_isSaving">
+                @(_isSaving ? "Menyimpan..." : "Simpan Pegawai")
+            </button>
+            <a href="/employees" class="btn btn-link">Batal</a>
+        </div>
+    </EditForm>
+}
+
+@code {
+    private List<Company>? _companies;
+    private List<Department>? _departments;
+    private List<Designation>? _designations;
+    private List<EmploymentType>? _employmentTypes;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companies = await UnitOfWork.Repository<Company>().GetAllAsync();
+        _departments = await UnitOfWork.Repository<Department>().GetAllAsync();
+        _designations = await UnitOfWork.Repository<Designation>().GetAllAsync();
+        _employmentTypes = await UnitOfWork.Repository<EmploymentType>().GetAllAsync();
+    }
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        if (!Guid.TryParse(_model.CompanyId, out var companyId) ||
+            !Guid.TryParse(_model.DepartmentId, out var departmentId) ||
+            !Guid.TryParse(_model.DesignationId, out var designationId) ||
+            !Guid.TryParse(_model.EmploymentTypeId, out var employmentTypeId))
+        {
+            _errorMessage = "Lengkapi semua field referensi (Perusahaan, Departemen, Jabatan, Tipe Kepegawaian).";
+            _isSaving = false;
+            return;
+        }
+
+        var request = new CreateEmployeeRequest(
+            _model.FirstName, _model.MiddleName, _model.LastName,
+            DateOnly.FromDateTime(_model.DateOfBirth), _model.Gender,
+            _model.Email, _model.MobileNumber,
+            DateOnly.FromDateTime(_model.DateOfJoining),
+            companyId, departmentId, designationId, employmentTypeId,
+            ReportsToEmployeeId: null, BranchId: null, HolidayListId: null);
+
+        var result = await EmployeeService.CreateAsync(request);
+
+        if (result.Succeeded)
+        {
+            Nav.NavigateTo("/employees");
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string FirstName { get; set; } = string.Empty;
+        public string? MiddleName { get; set; }
+        public string LastName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string? MobileNumber { get; set; }
+        public DateTime DateOfBirth { get; set; } = DateTime.Today.AddYears(-25);
+        public DateTime DateOfJoining { get; set; } = DateTime.Today;
+        public Gender Gender { get; set; } = Gender.Male;
+        public string CompanyId { get; set; } = string.Empty;
+        public string DepartmentId { get; set; } = string.Empty;
+        public string DesignationId { get; set; } = string.Empty;
+        public string EmploymentTypeId { get; set; } = string.Empty;
+    }
+}

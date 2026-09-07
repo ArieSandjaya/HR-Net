@@ -1,0 +1,320 @@
+@page "/appraisals/{AppraisalId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Performance
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@using HRMS.Domain.Enums
+@inject IAppraisalService AppraisalService
+@inject IGoalService GoalService
+@inject IKraService KraService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Detail Penilaian</PageTitle>
+
+@if (_appraisal is null)
+{
+    <p><em>Memuat...</em></p>
+}
+else
+{
+    <h1>@_appraisal.EmployeeName</h1>
+    <p class="text-muted">Siklus: @_appraisal.CycleName &middot; Status: <span class="badge bg-@StatusBadge(_appraisal.Status)">@_appraisal.Status</span></p>
+
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+    }
+
+    <hr />
+    <h4>Goals</h4>
+    <table class="table table-sm" style="max-width: 700px;">
+        <thead><tr><th>KRA</th><th>Deskripsi</th><th>Progress</th><th></th></tr></thead>
+        <tbody>
+            @if (_appraisal.Goals.Count == 0)
+            {
+                <tr><td colspan="4" class="text-muted">Belum ada goal.</td></tr>
+            }
+            @foreach (var g in _appraisal.Goals)
+            {
+                <tr>
+                    <td>@g.KraTitle</td>
+                    <td>@g.Description</td>
+                    <td style="min-width: 160px;">
+                        <div class="d-flex align-items-center gap-2">
+                            <input type="range" min="0" max="100" value="@g.ProgressPercent"
+                                   @onchange="e => UpdateProgress(g.Id, e.Value)" />
+                            <span>@g.ProgressPercent%</span>
+                        </div>
+                    </td>
+                    <td><span class="badge bg-secondary">@g.Status</span></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <button class="btn btn-outline-primary btn-sm" @onclick="() => _showGoalForm = !_showGoalForm">+ Tambah Goal</button>
+    @if (_showGoalForm && _kras is not null)
+    {
+        <EditForm Model="_goalModel" OnValidSubmit="HandleAddGoal" class="mt-2" style="max-width: 600px;">
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <InputSelect class="form-select" @bind-Value="_goalModel.KRAId">
+                        <option value="">-- KRA --</option>
+                        @foreach (var k in _kras)
+                        {
+                            <option value="@k.Id">@k.Title</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-6">
+                    <InputText class="form-control" @bind-Value="_goalModel.Description" placeholder="Deskripsi goal" />
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-primary w-100" type="submit">Tambah</button>
+                </div>
+            </div>
+        </EditForm>
+    }
+
+    <hr />
+    <h4>Self-Assessment</h4>
+    @if (_appraisal.Status == AppraisalStatus.Draft)
+    {
+        <EditForm Model="_selfModel" OnValidSubmit="HandleSelfAssessment" style="max-width: 600px;">
+            <div class="mb-2">
+                <label class="form-label">Komentar</label>
+                <InputTextArea class="form-control" @bind-Value="_selfModel.Comments" rows="3" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Rating Diri (1-5)</label>
+                <InputNumber class="form-control" @bind-Value="_selfModel.SelfRating" />
+            </div>
+            <button class="btn btn-primary" type="submit">Kirim Self-Assessment</button>
+        </EditForm>
+    }
+    else
+    {
+        <p><strong>Rating diri:</strong> @_appraisal.SelfRating</p>
+        <p>@_appraisal.SelfAssessmentComments</p>
+    }
+
+    <hr />
+    <h4>Review Manager</h4>
+    @if (_appraisal.Status == AppraisalStatus.SelfAssessmentSubmitted && _employees is not null)
+    {
+        <EditForm Model="_managerModel" OnValidSubmit="HandleManagerReview" style="max-width: 600px;">
+            <div class="mb-2">
+                <label class="form-label">Direview oleh</label>
+                <InputSelect class="form-select" @bind-Value="_managerModel.ReviewerEmployeeId">
+                    <option value="">-- Pilih --</option>
+                    @foreach (var e in _employees)
+                    {
+                        <option value="@e.Id">@e.FullName</option>
+                    }
+                </InputSelect>
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Komentar Manager</label>
+                <InputTextArea class="form-control" @bind-Value="_managerModel.Comments" rows="3" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Rating Akhir (1-5)</label>
+                <InputNumber class="form-control" @bind-Value="_managerModel.FinalRating" />
+            </div>
+            <button class="btn btn-primary" type="submit">Selesaikan Penilaian</button>
+        </EditForm>
+    }
+    else if (_appraisal.Status == AppraisalStatus.Completed)
+    {
+        <p><strong>Rating akhir:</strong> @_appraisal.FinalRating &middot; Direview oleh @_appraisal.ReviewedByName</p>
+        <p>@_appraisal.ManagerComments</p>
+    }
+    else
+    {
+        <p class="text-muted">Menunggu pegawai mengisi self-assessment terlebih dahulu.</p>
+    }
+
+    <hr />
+    <h4>Feedback 360</h4>
+    @foreach (var f in _appraisal.Feedbacks)
+    {
+        <div class="border-start ps-2 mb-2">
+            <strong>@f.ReviewerName</strong> (@f.ReviewerRelation) — Rating @f.Rating/5
+            @if (!string.IsNullOrEmpty(f.Comments))
+            {
+                <div><small class="text-muted">@f.Comments</small></div>
+            }
+        </div>
+    }
+
+    <button class="btn btn-outline-primary btn-sm" @onclick="() => _showFeedbackForm = !_showFeedbackForm">+ Tambah Feedback</button>
+    @if (_showFeedbackForm && _employees is not null)
+    {
+        <EditForm Model="_feedbackModel" OnValidSubmit="HandleAddFeedback" class="mt-2" style="max-width: 600px;">
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <InputSelect class="form-select" @bind-Value="_feedbackModel.ReviewerEmployeeId">
+                        <option value="">-- Pemberi feedback --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="col-md-3">
+                    <InputSelect class="form-select" @bind-Value="_feedbackModel.ReviewerRelation">
+                        <option value="@FeedbackReviewerRelation.Peer">Peer</option>
+                        <option value="@FeedbackReviewerRelation.Manager">Manager</option>
+                        <option value="@FeedbackReviewerRelation.Self">Self</option>
+                    </InputSelect>
+                </div>
+                <div class="col-md-2">
+                    <InputNumber class="form-control" @bind-Value="_feedbackModel.Rating" placeholder="1-5" />
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary w-100" type="submit">Kirim</button>
+                </div>
+                <div class="col-12">
+                    <InputTextArea class="form-control" @bind-Value="_feedbackModel.Comments" rows="2" placeholder="Komentar" />
+                </div>
+            </div>
+        </EditForm>
+    }
+}
+
+@code {
+    [Parameter] public Guid AppraisalId { get; set; }
+
+    private AppraisalDto? _appraisal;
+    private List<KraDto>? _kras;
+    private List<Employee>? _employees;
+    private bool _showGoalForm;
+    private bool _showFeedbackForm;
+    private string? _message;
+    private bool _isError;
+
+    private readonly GoalFormModel _goalModel = new();
+    private readonly SelfAssessmentFormModel _selfModel = new();
+    private readonly ManagerReviewFormModel _managerModel = new();
+    private readonly FeedbackFormModel _feedbackModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _kras = await KraService.GetAllAsync();
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _appraisal = await AppraisalService.GetByIdAsync(AppraisalId);
+
+    private async Task UpdateProgress(Guid goalId, object? value)
+    {
+        if (value is null || !decimal.TryParse(value.ToString(), out var progress)) return;
+
+        var result = await GoalService.UpdateProgressAsync(new UpdateGoalProgressRequest(goalId, progress));
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? null : string.Join(" ", result.Errors);
+        await LoadAsync();
+    }
+
+    private async Task HandleAddGoal()
+    {
+        if (_appraisal is null || !Guid.TryParse(_goalModel.KRAId, out var kraId))
+        {
+            _isError = true;
+            _message = "Pilih KRA terlebih dahulu.";
+            return;
+        }
+
+        var result = await GoalService.CreateAsync(new CreateGoalRequest(_appraisal.EmployeeId, _appraisal.AppraisalCycleId, kraId, _goalModel.Description));
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Goal ditambahkan." : string.Join(" ", result.Errors);
+
+        if (result.Succeeded)
+        {
+            _showGoalForm = false;
+            _goalModel.Description = string.Empty;
+            await LoadAsync();
+        }
+    }
+
+    private async Task HandleSelfAssessment()
+    {
+        var result = await AppraisalService.SubmitSelfAssessmentAsync(new SubmitSelfAssessmentRequest(AppraisalId, _selfModel.Comments, _selfModel.SelfRating));
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Self-assessment terkirim." : string.Join(" ", result.Errors);
+        if (result.Succeeded) await LoadAsync();
+    }
+
+    private async Task HandleManagerReview()
+    {
+        if (!Guid.TryParse(_managerModel.ReviewerEmployeeId, out var reviewerId))
+        {
+            _isError = true;
+            _message = "Pilih reviewer terlebih dahulu.";
+            return;
+        }
+
+        var result = await AppraisalService.SubmitManagerReviewAsync(new SubmitManagerReviewRequest(AppraisalId, reviewerId, _managerModel.Comments, _managerModel.FinalRating));
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Penilaian selesai." : string.Join(" ", result.Errors);
+        if (result.Succeeded) await LoadAsync();
+    }
+
+    private async Task HandleAddFeedback()
+    {
+        if (!Guid.TryParse(_feedbackModel.ReviewerEmployeeId, out var reviewerId))
+        {
+            _isError = true;
+            _message = "Pilih pemberi feedback terlebih dahulu.";
+            return;
+        }
+
+        var result = await AppraisalService.AddFeedbackAsync(new AddAppraisalFeedbackRequest(
+            AppraisalId, reviewerId, _feedbackModel.ReviewerRelation, _feedbackModel.Rating, _feedbackModel.Comments));
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Feedback ditambahkan." : string.Join(" ", result.Errors);
+
+        if (result.Succeeded)
+        {
+            _showFeedbackForm = false;
+            _feedbackModel.Comments = null;
+            await LoadAsync();
+        }
+    }
+
+    private static string StatusBadge(AppraisalStatus status) => status switch
+    {
+        AppraisalStatus.Completed => "success",
+        AppraisalStatus.SelfAssessmentSubmitted => "info",
+        _ => "warning"
+    };
+
+    private class GoalFormModel
+    {
+        public string KRAId { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+    }
+
+    private class SelfAssessmentFormModel
+    {
+        public string Comments { get; set; } = string.Empty;
+        public decimal SelfRating { get; set; } = 3;
+    }
+
+    private class ManagerReviewFormModel
+    {
+        public string ReviewerEmployeeId { get; set; } = string.Empty;
+        public string Comments { get; set; } = string.Empty;
+        public decimal FinalRating { get; set; } = 3;
+    }
+
+    private class FeedbackFormModel
+    {
+        public string ReviewerEmployeeId { get; set; } = string.Empty;
+        public FeedbackReviewerRelation ReviewerRelation { get; set; } = FeedbackReviewerRelation.Peer;
+        public decimal Rating { get; set; } = 3;
+        public string? Comments { get; set; }
+    }
+}

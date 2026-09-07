@@ -1,0 +1,107 @@
+@page "/shift-types"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Attendance
+@inject IShiftService ShiftService
+@rendermode InteractiveServer
+
+<PageTitle>Jenis Shift</PageTitle>
+
+<h1>Jenis Shift</h1>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_shiftTypes is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_shiftTypes.Count == 0)
+        {
+            <p class="text-muted">Belum ada jenis shift.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Nama</th><th>Jam Mulai</th><th>Jam Selesai</th></tr></thead>
+                <tbody>
+                    @foreach (var s in _shiftTypes)
+                    {
+                        <tr>
+                            <td>@s.Name</td>
+                            <td>@s.StartTime.ToString("HH:mm")</td>
+                            <td>@s.EndTime.ToString("HH:mm")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Tambah Jenis Shift</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+            <div class="mb-2">
+                <label class="form-label">Nama Shift</label>
+                <InputText class="form-control" @bind-Value="_model.Name" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Jam Mulai</label>
+                <input type="time" class="form-control" @bind="_model.StartTime" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Jam Selesai</label>
+                <input type="time" class="form-control" @bind="_model.EndTime" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Toleransi Telat (menit)</label>
+                <InputNumber class="form-control" @bind-Value="_model.LateEntryGraceMinutes" />
+            </div>
+            <button class="btn btn-primary" type="submit" disabled="@_isSaving">Simpan</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private List<ShiftTypeDto>? _shiftTypes;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _shiftTypes = await ShiftService.GetShiftTypesAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        var request = new CreateShiftTypeRequest(
+            _model.Name, _model.StartTime, _model.EndTime, _model.LateEntryGraceMinutes, 10);
+
+        var result = await ShiftService.CreateShiftTypeAsync(request);
+
+        if (result.Succeeded)
+        {
+            _model.Name = string.Empty;
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public TimeOnly StartTime { get; set; } = new(9, 0);
+        public TimeOnly EndTime { get; set; } = new(18, 0);
+        public int LateEntryGraceMinutes { get; set; } = 10;
+    }
+}

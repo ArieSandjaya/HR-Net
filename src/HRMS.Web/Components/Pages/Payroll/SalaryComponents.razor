@@ -1,0 +1,129 @@
+@page "/salary-components"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Payroll
+@using HRMS.Domain.Enums
+@inject ISalaryComponentService SalaryComponentService
+@rendermode InteractiveServer
+
+<PageTitle>Komponen Gaji</PageTitle>
+
+<h1>Komponen Gaji</h1>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_components is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_components.Count == 0)
+        {
+            <p class="text-muted">Belum ada komponen gaji.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Nama</th><th>Tipe</th><th>Perhitungan</th><th>Nilai Default</th></tr></thead>
+                <tbody>
+                    @foreach (var c in _components)
+                    {
+                        <tr>
+                            <td>@c.Name</td>
+                            <td><span class="badge bg-@(c.ComponentType == SalaryComponentType.Earning ? "success" : "danger")">@c.ComponentType</span></td>
+                            <td>@(c.CalculationType == SalaryCalculationType.FixedAmount ? "Jumlah Tetap" : "Persentase Gaji Pokok")</td>
+                            <td>@(c.CalculationType == SalaryCalculationType.FixedAmount ? c.DefaultAmount?.ToString("N0") : $"{c.DefaultPercentage}%")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Tambah Komponen</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+            <div class="mb-2">
+                <label class="form-label">Nama Komponen</label>
+                <InputText class="form-control" @bind-Value="_model.Name" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Tipe</label>
+                <InputSelect class="form-select" @bind-Value="_model.ComponentType">
+                    <option value="@SalaryComponentType.Earning">Earning (Pendapatan)</option>
+                    <option value="@SalaryComponentType.Deduction">Deduction (Potongan)</option>
+                </InputSelect>
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Cara Hitung</label>
+                <InputSelect class="form-select" @bind-Value="_model.CalculationType">
+                    <option value="@SalaryCalculationType.FixedAmount">Jumlah Tetap (Rp)</option>
+                    <option value="@SalaryCalculationType.PercentageOfBasic">Persentase dari Gaji Pokok</option>
+                </InputSelect>
+            </div>
+            @if (_model.CalculationType == SalaryCalculationType.FixedAmount)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Nominal (Rp)</label>
+                    <InputNumber class="form-control" @bind-Value="_model.DefaultAmount" />
+                </div>
+            }
+            else
+            {
+                <div class="mb-3">
+                    <label class="form-label">Persentase (%)</label>
+                    <InputNumber class="form-control" @bind-Value="_model.DefaultPercentage" />
+                </div>
+            }
+            <button class="btn btn-primary" type="submit" disabled="@_isSaving">Simpan</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private List<SalaryComponentDto>? _components;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _components = await SalaryComponentService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        var request = new CreateSalaryComponentRequest(
+            _model.Name, _model.ComponentType, _model.CalculationType,
+            _model.CalculationType == SalaryCalculationType.FixedAmount ? _model.DefaultAmount : null,
+            _model.CalculationType == SalaryCalculationType.PercentageOfBasic ? _model.DefaultPercentage : null,
+            true);
+
+        var result = await SalaryComponentService.CreateAsync(request);
+
+        if (result.Succeeded)
+        {
+            _model.Name = string.Empty;
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public SalaryComponentType ComponentType { get; set; } = SalaryComponentType.Earning;
+        public SalaryCalculationType CalculationType { get; set; } = SalaryCalculationType.FixedAmount;
+        public decimal? DefaultAmount { get; set; }
+        public decimal? DefaultPercentage { get; set; }
+    }
+}

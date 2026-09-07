@@ -1,0 +1,127 @@
+@page "/leave-applications"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Leave
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Leave
+@inject IUnitOfWork UnitOfWork
+@inject ILeaveApplicationService LeaveService
+@inject ICurrentUserService CurrentUser
+@rendermode InteractiveServer
+
+<PageTitle>Pengajuan Cuti</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Pengajuan Cuti</h1>
+    <a class="btn btn-primary" href="/leave-applications/new">+ Ajukan Cuti</a>
+</div>
+
+@if (!CurrentUser.EmployeeId.HasValue)
+{
+    <div class="alert alert-warning">
+        Akun Anda belum ditautkan ke data pegawai, sehingga tidak bisa menyetujui/menolak cuti sebagai atasan.
+        Anda tetap bisa melihat daftar di bawah.
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+}
+
+@if (_applications is null)
+{
+    <p><em>Memuat data...</em></p>
+}
+else if (_applications.Count == 0)
+{
+    <p class="text-muted">Belum ada pengajuan cuti.</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Pegawai</th>
+                <th>Jenis Cuti</th>
+                <th>Dari</th>
+                <th>Sampai</th>
+                <th>Jumlah Hari</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var app in _applications)
+            {
+                <tr>
+                    <td>@app.Employee?.FullName</td>
+                    <td>@app.LeaveType?.Name</td>
+                    <td>@app.FromDate.ToString("dd MMM yyyy")</td>
+                    <td>@app.ToDate.ToString("dd MMM yyyy")</td>
+                    <td>@app.TotalLeaveDays</td>
+                    <td><span class="badge bg-@StatusBadge(app.Status)">@app.Status</span></td>
+                    <td>
+                        @if (app.Status == HRMS.Domain.Enums.LeaveApplicationStatus.Open)
+                        {
+                            <button class="btn btn-sm btn-success" disabled="@(!CurrentUser.EmployeeId.HasValue)" @onclick="() => Approve(app.Id)">Setujui</button>
+                            <button class="btn btn-sm btn-outline-danger" disabled="@(!CurrentUser.EmployeeId.HasValue)" @onclick="() => Reject(app.Id)">Tolak</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<LeaveApplication>? _applications;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        // Loaded directly via repository here for brevity; in the full build this goes
+        // through a dedicated query service (same pattern as IEmployeeService) with proper
+        // eager-loading and pagination.
+        var apps = await UnitOfWork.Repository<LeaveApplication>().GetAllAsync();
+        var employees = await UnitOfWork.Repository<HRMS.Domain.Entities.Employees.Employee>().GetAllAsync();
+        var leaveTypes = await UnitOfWork.Repository<LeaveType>().GetAllAsync();
+
+        _applications = apps.Select(a =>
+        {
+            a.Employee = employees.FirstOrDefault(e => e.Id == a.EmployeeId);
+            a.LeaveType = leaveTypes.FirstOrDefault(lt => lt.Id == a.LeaveTypeId);
+            return a;
+        }).OrderByDescending(a => a.CreatedAt).ToList();
+    }
+
+    private async Task Approve(Guid id)
+    {
+        if (!CurrentUser.EmployeeId.HasValue) return;
+
+        var result = await LeaveService.ApproveAsync(id, CurrentUser.EmployeeId.Value);
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Cuti disetujui." : string.Join(" ", result.Errors);
+        await LoadAsync();
+    }
+
+    private async Task Reject(Guid id)
+    {
+        if (!CurrentUser.EmployeeId.HasValue) return;
+
+        var result = await LeaveService.RejectAsync(id, CurrentUser.EmployeeId.Value, "Ditolak oleh atasan");
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Cuti ditolak." : string.Join(" ", result.Errors);
+        await LoadAsync();
+    }
+
+    private static string StatusBadge(HRMS.Domain.Enums.LeaveApplicationStatus status) => status switch
+    {
+        HRMS.Domain.Enums.LeaveApplicationStatus.Approved => "success",
+        HRMS.Domain.Enums.LeaveApplicationStatus.Rejected => "danger",
+        HRMS.Domain.Enums.LeaveApplicationStatus.Cancelled => "secondary",
+        _ => "warning"
+    };
+}

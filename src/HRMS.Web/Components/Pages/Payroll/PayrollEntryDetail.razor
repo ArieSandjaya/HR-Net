@@ -1,0 +1,77 @@
+@page "/payroll-entries/{PayrollEntryId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Payroll
+@using HRMS.Domain.Enums
+@inject IPayrollEntryService PayrollEntryService
+@rendermode InteractiveServer
+
+<PageTitle>Detail Payroll</PageTitle>
+
+<p><a href="/payroll-entries">&larr; Kembali ke Daftar Payroll</a></p>
+<h1>Slip Gaji</h1>
+
+@if (_slips is null)
+{
+    <p><em>Memuat...</em></p>
+}
+else if (_slips.Count == 0)
+{
+    <p class="text-muted">Tidak ada slip gaji untuk payroll ini.</p>
+}
+else
+{
+    @foreach (var slip in _slips)
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">@slip.EmployeeName <small class="text-muted">(@slip.EmployeeNumber)</small></h5>
+                <p class="text-muted mb-2">
+                    Periode @slip.PeriodStart.ToString("dd MMM yyyy") - @slip.PeriodEnd.ToString("dd MMM yyyy")
+                    &middot; Hari kerja: @slip.WorkingDaysInPeriod
+                    &middot; Absen: @slip.UnpaidAbsentDays hari
+                </p>
+
+                <table class="table table-sm">
+                    <tbody>
+                        <tr>
+                            <td>Gaji Pokok (setelah prorata)</td>
+                            <td class="text-end">Rp @slip.BaseSalary.ToString("N0")</td>
+                        </tr>
+                        @foreach (var c in slip.Components)
+                        {
+                            <tr>
+                                <td>@c.ComponentName <span class="badge bg-@(c.ComponentType == SalaryComponentType.Earning ? "success" : "danger") badge-sm">@c.ComponentType</span></td>
+                                <td class="text-end">
+                                    @(c.ComponentType == SalaryComponentType.Deduction ? "- " : "")Rp @c.Amount.ToString("N0")
+                                </td>
+                            </tr>
+                        }
+                        <tr class="fw-bold">
+                            <td>Gross Pay</td>
+                            <td class="text-end">Rp @slip.GrossPay.ToString("N0")</td>
+                        </tr>
+                        <tr>
+                            <td>Total Potongan</td>
+                            <td class="text-end">- Rp @slip.TotalDeductions.ToString("N0")</td>
+                        </tr>
+                        <tr class="fw-bold table-active">
+                            <td>Net Pay</td>
+                            <td class="text-end">Rp @slip.NetPay.ToString("N0")</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid PayrollEntryId { get; set; }
+
+    private List<SalarySlipDto>? _slips;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _slips = await PayrollEntryService.GetSalarySlipsAsync(PayrollEntryId);
+    }
+}

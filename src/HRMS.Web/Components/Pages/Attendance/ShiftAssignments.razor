@@ -1,0 +1,140 @@
+@page "/shift-assignments"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Attendance
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@inject IShiftService ShiftService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Penugasan Shift</PageTitle>
+
+<h1>Penugasan Shift</h1>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_assignments is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_assignments.Count == 0)
+        {
+            <p class="text-muted">Belum ada penugasan shift.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Pegawai</th><th>Shift</th><th>Mulai</th><th>Selesai</th></tr></thead>
+                <tbody>
+                    @foreach (var a in _assignments)
+                    {
+                        <tr>
+                            <td>@a.EmployeeName</td>
+                            <td>@a.ShiftTypeName</td>
+                            <td>@a.StartDate.ToString("dd MMM yyyy")</td>
+                            <td>@(a.EndDate?.ToString("dd MMM yyyy") ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Tugaskan Shift</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        @if (_employees is not null && _shiftTypes is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Pegawai</label>
+                    <InputSelect class="form-select" @bind-Value="_model.EmployeeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Jenis Shift</label>
+                    <InputSelect class="form-select" @bind-Value="_model.ShiftTypeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var s in _shiftTypes)
+                        {
+                            <option value="@s.Id">@s.Name (@s.StartTime.ToString("HH:mm")-@s.EndTime.ToString("HH:mm"))</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Tanggal Mulai</label>
+                    <InputDate class="form-control" @bind-Value="_model.StartDate" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Tanggal Selesai (opsional)</label>
+                    <input type="date" class="form-control" @bind="_model.EndDate" />
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Simpan</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private List<ShiftAssignmentDto>? _assignments;
+    private List<ShiftTypeDto>? _shiftTypes;
+    private List<Employee>? _employees;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        _shiftTypes = await ShiftService.GetShiftTypesAsync();
+        await LoadAssignmentsAsync();
+    }
+
+    private async Task LoadAssignmentsAsync() => _assignments = await ShiftService.GetShiftAssignmentsAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        if (!Guid.TryParse(_model.EmployeeId, out var employeeId) || !Guid.TryParse(_model.ShiftTypeId, out var shiftTypeId))
+        {
+            _errorMessage = "Pilih pegawai dan jenis shift terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var request = new AssignShiftRequest(
+            employeeId, shiftTypeId, DateOnly.FromDateTime(_model.StartDate),
+            _model.EndDate.HasValue ? DateOnly.FromDateTime(_model.EndDate.Value) : null);
+
+        var result = await ShiftService.AssignShiftAsync(request);
+
+        if (result.Succeeded)
+        {
+            await LoadAssignmentsAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public string ShiftTypeId { get; set; } = string.Empty;
+        public DateTime StartDate { get; set; } = DateTime.Today;
+        public DateTime? EndDate { get; set; }
+    }
+}

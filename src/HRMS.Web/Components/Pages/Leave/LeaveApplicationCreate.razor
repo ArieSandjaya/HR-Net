@@ -1,0 +1,149 @@
+@page "/leave-applications/new"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Leave
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Leave
+@using HRMS.Domain.Entities.Employees
+@inject IUnitOfWork UnitOfWork
+@inject ILeaveApplicationService LeaveService
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Ajukan Cuti</PageTitle>
+
+<h1>Ajukan Cuti</h1>
+
+@if (_employees is null || _leaveTypes is null)
+{
+    <p><em>Memuat data...</em></p>
+}
+else
+{
+    <EditForm Model="_model" OnValidSubmit="HandleSubmit" class="row g-3" style="max-width: 640px;">
+        <DataAnnotationsValidator />
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="col-12"><div class="alert alert-danger">@_errorMessage</div></div>
+        }
+        @if (_balance is not null)
+        {
+            <div class="col-12"><div class="alert alert-info">Saldo cuti tersedia: <strong>@_balance</strong> hari</div></div>
+        }
+
+        <div class="col-md-6">
+            <label class="form-label">Pegawai</label>
+            <InputSelect class="form-select" @bind-Value="_model.EmployeeId" @bind-Value:after="RefreshBalance">
+                <option value="">-- Pilih Pegawai --</option>
+                @foreach (var emp in _employees)
+                {
+                    <option value="@emp.Id">@emp.FullName (@emp.EmployeeNumber)</option>
+                }
+            </InputSelect>
+        </div>
+
+        <div class="col-md-6">
+            <label class="form-label">Jenis Cuti</label>
+            <InputSelect class="form-select" @bind-Value="_model.LeaveTypeId" @bind-Value:after="RefreshBalance">
+                <option value="">-- Pilih Jenis Cuti --</option>
+                @foreach (var lt in _leaveTypes)
+                {
+                    <option value="@lt.Id">@lt.Name</option>
+                }
+            </InputSelect>
+        </div>
+
+        <div class="col-md-6">
+            <label class="form-label">Dari Tanggal</label>
+            <InputDate class="form-control" @bind-Value="_model.FromDate" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Sampai Tanggal</label>
+            <InputDate class="form-control" @bind-Value="_model.ToDate" />
+        </div>
+
+        <div class="col-md-6">
+            <div class="form-check mt-4">
+                <InputCheckbox class="form-check-input" @bind-Value="_model.IsHalfDay" id="halfDay" />
+                <label class="form-check-label" for="halfDay">Setengah hari</label>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <label class="form-label">Alasan</label>
+            <InputTextArea class="form-control" @bind-Value="_model.Reason" rows="3" />
+        </div>
+
+        <div class="col-12 mt-3">
+            <button type="submit" class="btn btn-primary" disabled="@_isSaving">
+                @(_isSaving ? "Mengirim..." : "Ajukan Cuti")
+            </button>
+            <a href="/leave-applications" class="btn btn-link">Batal</a>
+        </div>
+    </EditForm>
+}
+
+@code {
+    private List<Employee>? _employees;
+    private List<LeaveType>? _leaveTypes;
+    private decimal? _balance;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        _leaveTypes = await UnitOfWork.Repository<LeaveType>().GetAllAsync();
+    }
+
+    private async Task RefreshBalance()
+    {
+        _balance = null;
+        if (Guid.TryParse(_model.EmployeeId, out var empId) && Guid.TryParse(_model.LeaveTypeId, out var leaveTypeId))
+        {
+            _balance = await LeaveService.GetLeaveBalanceAsync(empId, leaveTypeId, DateOnly.FromDateTime(DateTime.Today));
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        if (!Guid.TryParse(_model.EmployeeId, out var employeeId) || !Guid.TryParse(_model.LeaveTypeId, out var leaveTypeId))
+        {
+            _errorMessage = "Pilih pegawai dan jenis cuti terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var request = new ApplyLeaveRequest(
+            employeeId, leaveTypeId,
+            DateOnly.FromDateTime(_model.FromDate), DateOnly.FromDateTime(_model.ToDate),
+            _model.IsHalfDay, _model.Reason);
+
+        var result = await LeaveService.ApplyAsync(request);
+
+        if (result.Succeeded)
+        {
+            Nav.NavigateTo("/leave-applications");
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public string LeaveTypeId { get; set; } = string.Empty;
+        public DateTime FromDate { get; set; } = DateTime.Today;
+        public DateTime ToDate { get; set; } = DateTime.Today;
+        public bool IsHalfDay { get; set; }
+        public string? Reason { get; set; }
+    }
+}

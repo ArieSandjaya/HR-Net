@@ -1,0 +1,146 @@
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">HRMS</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Beranda
+            </NavLink>
+        </div>
+        <AuthorizeView>
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="employees">
+                        <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> Pegawai
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="leave-applications">
+                        <span class="bi bi-calendar-fill-nav-menu" aria-hidden="true"></span> Cuti
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="attendance/checkin">
+                        <span class="bi bi-clock-fill-nav-menu" aria-hidden="true"></span> Check-in/out
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="attendance">
+                        <span class="bi bi-list-check-nav-menu" aria-hidden="true"></span> Rekap Absensi
+                    </NavLink>
+                </div>
+                <AuthorizeView Roles="Administrator,HR Manager" Context="innerContext">
+                    <Authorized>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="leave-allocations">
+                                <span class="bi bi-calendar-plus-fill-nav-menu" aria-hidden="true"></span> Alokasi Cuti
+                            </NavLink>
+                        </div>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="shift-types">
+                                <span class="bi bi-gear-fill-nav-menu" aria-hidden="true"></span> Jenis Shift
+                            </NavLink>
+                        </div>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="shift-assignments">
+                                <span class="bi bi-people-fill-nav-menu" aria-hidden="true"></span> Penugasan Shift
+                            </NavLink>
+                        </div>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="expense-categories">
+                                <span class="bi bi-tags-fill-nav-menu" aria-hidden="true"></span> Kategori Pengeluaran
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+                <AuthorizeView Roles="Administrator,HR Manager,HR User" Context="recruitmentContext">
+                    <Authorized>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="job-openings">
+                                <span class="bi bi-briefcase-fill-nav-menu" aria-hidden="true"></span> Rekrutmen
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+                <AuthorizeView Roles="Administrator,HR Manager" Context="separationContext">
+                    <Authorized>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="employee-separations">
+                                <span class="bi bi-box-arrow-right-nav-menu" aria-hidden="true"></span> Exit &amp; Separation
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="expense-claims">
+                        <span class="bi bi-receipt-nav-menu" aria-hidden="true"></span> Klaim Pengeluaran
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="employee-advances">
+                        <span class="bi bi-cash-nav-menu" aria-hidden="true"></span> Advance Pegawai
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="travel-requests">
+                        <span class="bi bi-airplane-fill-nav-menu" aria-hidden="true"></span> Perjalanan Dinas
+                    </NavLink>
+                </div>
+                <AuthorizeView Roles="Administrator,HR Manager" Context="payrollContext">
+                    <Authorized>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="payroll-entries">
+                                <span class="bi bi-cash-stack-nav-menu" aria-hidden="true"></span> Payroll
+                            </NavLink>
+                        </div>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="salary-components">
+                                <span class="bi bi-list-ul-nav-menu" aria-hidden="true"></span> Komponen Gaji
+                            </NavLink>
+                        </div>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="salary-structures">
+                                <span class="bi bi-diagram-3-fill-nav-menu" aria-hidden="true"></span> Struktur Gaji
+                            </NavLink>
+                        </div>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="salary-structure-assignments">
+                                <span class="bi bi-person-check-fill-nav-menu" aria-hidden="true"></span> Penugasan Gaji
+                            </NavLink>
+                        </div>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="appraisal-cycles">
+                                <span class="bi bi-star-fill-nav-menu" aria-hidden="true"></span> Siklus Penilaian
+                            </NavLink>
+                        </div>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="kras">
+                                <span class="bi bi-bullseye-nav-menu" aria-hidden="true"></span> KRA
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+                <div class="nav-item px-3 mt-3">
+                    <span class="nav-link text-white-50">@context.User.FindFirst("FullName")?.Value</span>
+                </div>
+                <div class="nav-item px-3">
+                    <form method="post" action="/account/logout">
+                        <AntiforgeryToken />
+                        <button type="submit" class="nav-link btn btn-link text-start p-0 border-0">Keluar</button>
+                    </form>
+                </div>
+            </Authorized>
+            <NotAuthorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="login">Masuk</NavLink>
+                </div>
+            </NotAuthorized>
+        </AuthorizeView>
+    </nav>
+</div>

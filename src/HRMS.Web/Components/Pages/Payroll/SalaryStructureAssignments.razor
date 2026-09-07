@@ -1,0 +1,138 @@
+@page "/salary-structure-assignments"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Payroll
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@inject ISalaryStructureService SalaryStructureService
+@inject IUnitOfWork UnitOfWork
+@rendermode InteractiveServer
+
+<PageTitle>Penugasan Struktur Gaji</PageTitle>
+
+<h1>Penugasan Struktur Gaji</h1>
+<p class="text-muted">Tetapkan struktur gaji dan gaji pokok untuk tiap pegawai. Tanpa ini, pegawai tidak akan muncul saat payroll dijalankan.</p>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_assignments is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_assignments.Count == 0)
+        {
+            <p class="text-muted">Belum ada penugasan struktur gaji.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Pegawai</th><th>Struktur</th><th>Gaji Pokok</th><th>Berlaku Sejak</th></tr></thead>
+                <tbody>
+                    @foreach (var a in _assignments)
+                    {
+                        <tr>
+                            <td>@a.EmployeeName</td>
+                            <td>@a.SalaryStructureName</td>
+                            <td>Rp @a.BaseSalary.ToString("N0")</td>
+                            <td>@a.FromDate.ToString("dd MMM yyyy")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Tugaskan Struktur Gaji</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        @if (_employees is not null && _structures is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Pegawai</label>
+                    <InputSelect class="form-select" @bind-Value="_model.EmployeeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName (@e.EmployeeNumber)</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Struktur Gaji</label>
+                    <InputSelect class="form-select" @bind-Value="_model.SalaryStructureId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var s in _structures)
+                        {
+                            <option value="@s.Id">@s.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Gaji Pokok (Rp)</label>
+                    <InputNumber class="form-control" @bind-Value="_model.BaseSalary" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Berlaku Sejak</label>
+                    <InputDate class="form-control" @bind-Value="_model.FromDate" />
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Tugaskan</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private List<SalaryStructureAssignmentDto>? _assignments;
+    private List<Employee>? _employees;
+    private List<SalaryStructureDto>? _structures;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        _structures = await SalaryStructureService.GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _assignments = await SalaryStructureService.GetAssignmentsAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        if (!Guid.TryParse(_model.EmployeeId, out var employeeId) || !Guid.TryParse(_model.SalaryStructureId, out var structureId))
+        {
+            _errorMessage = "Pilih pegawai dan struktur gaji terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var request = new AssignSalaryStructureRequest(employeeId, structureId, _model.BaseSalary, DateOnly.FromDateTime(_model.FromDate));
+        var result = await SalaryStructureService.AssignAsync(request);
+
+        if (result.Succeeded)
+        {
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public string SalaryStructureId { get; set; } = string.Empty;
+        public decimal BaseSalary { get; set; }
+        public DateTime FromDate { get; set; } = DateTime.Today;
+    }
+}

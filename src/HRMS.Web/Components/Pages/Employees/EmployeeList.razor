@@ -1,0 +1,73 @@
+@page "/employees"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Employees
+@inject IEmployeeService EmployeeService
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Pegawai</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>Data Pegawai</h1>
+    <a class="btn btn-primary" href="/employees/new">+ Tambah Pegawai</a>
+</div>
+
+@if (_employees is null)
+{
+    <p><em>Memuat data...</em></p>
+}
+else if (_employees.Count == 0)
+{
+    <p class="text-muted">Belum ada pegawai. Klik "Tambah Pegawai" untuk mulai.</p>
+}
+else
+{
+    <table class="table table-striped table-hover">
+        <thead>
+            <tr>
+                <th>No. Pegawai</th>
+                <th>Nama</th>
+                <th>Email</th>
+                <th>Departemen</th>
+                <th>Jabatan</th>
+                <th>Tanggal Bergabung</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var emp in _employees)
+            {
+                <tr>
+                    <td>@emp.EmployeeNumber</td>
+                    <td>@emp.FullName</td>
+                    <td>@emp.Email</td>
+                    <td>@(emp.DepartmentName ?? "-")</td>
+                    <td>@(emp.DesignationName ?? "-")</td>
+                    <td>@emp.DateOfJoining.ToString("dd MMM yyyy")</td>
+                    <td><span class="badge bg-@StatusBadge(emp.Status)">@emp.Status</span></td>
+                    <td>
+                        <a href="/employees/@emp.Id" class="btn btn-sm btn-outline-secondary">Detail</a>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<EmployeeDto>? _employees;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await EmployeeService.GetAllAsync();
+    }
+
+    private static string StatusBadge(HRMS.Domain.Enums.EmployeeStatus status) => status switch
+    {
+        HRMS.Domain.Enums.EmployeeStatus.Active => "success",
+        HRMS.Domain.Enums.EmployeeStatus.Suspended => "warning",
+        HRMS.Domain.Enums.EmployeeStatus.LeftOrganization => "secondary",
+        _ => "danger"
+    };
+}

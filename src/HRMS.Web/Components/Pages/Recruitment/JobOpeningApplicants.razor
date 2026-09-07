@@ -1,0 +1,127 @@
+@page "/job-openings/{JobOpeningId:guid}/applicants"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager,HR User")]
+@using HRMS.Application.Recruitment
+@inject IJobApplicantService JobApplicantService
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Pelamar</PageTitle>
+
+<h1>Pelamar</h1>
+<p><a href="/job-openings">&larr; Kembali ke Daftar Lowongan</a></p>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_applicants is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_applicants.Count == 0)
+        {
+            <p class="text-muted">Belum ada pelamar untuk lowongan ini.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Nama</th><th>Email</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var a in _applicants)
+                    {
+                        <tr>
+                            <td>@a.ApplicantName</td>
+                            <td>@a.Email</td>
+                            <td><span class="badge bg-@StatusBadge(a.Status)">@a.Status</span></td>
+                            <td><a href="/applicants/@a.Id" class="btn btn-sm btn-outline-secondary">Detail</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Tambah Pelamar</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+            <div class="mb-2">
+                <label class="form-label">Nama Lengkap</label>
+                <InputText class="form-control" @bind-Value="_model.ApplicantName" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Email</label>
+                <InputText class="form-control" type="email" @bind-Value="_model.Email" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Telepon</label>
+                <InputText class="form-control" @bind-Value="_model.Phone" />
+            </div>
+            <div class="mb-2">
+                <label class="form-label">Sumber</label>
+                <InputText class="form-control" @bind-Value="_model.Source" placeholder="LinkedIn, referral, dll." />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Catatan CV / Link</label>
+                <InputTextArea class="form-control" @bind-Value="_model.ResumeNotes" rows="2" />
+            </div>
+            <button class="btn btn-primary" type="submit" disabled="@_isSaving">Tambah Pelamar</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid JobOpeningId { get; set; }
+
+    private List<JobApplicantDto>? _applicants;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _applicants = await JobApplicantService.GetByJobOpeningAsync(JobOpeningId);
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        var request = new CreateJobApplicantRequest(
+            _model.ApplicantName, _model.Email, _model.Phone, _model.ResumeNotes, JobOpeningId, _model.Source);
+
+        var result = await JobApplicantService.CreateAsync(request);
+
+        if (result.Succeeded)
+        {
+            _model.ApplicantName = string.Empty;
+            _model.Email = string.Empty;
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private static string StatusBadge(HRMS.Domain.Enums.JobApplicantStatus status) => status switch
+    {
+        HRMS.Domain.Enums.JobApplicantStatus.Accepted => "success",
+        HRMS.Domain.Enums.JobApplicantStatus.Rejected => "danger",
+        HRMS.Domain.Enums.JobApplicantStatus.InterviewScheduled => "info",
+        HRMS.Domain.Enums.JobApplicantStatus.OnHold => "warning",
+        _ => "secondary"
+    };
+
+    private class FormModel
+    {
+        public string ApplicantName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public string? Source { get; set; }
+        public string? ResumeNotes { get; set; }
+    }
+}

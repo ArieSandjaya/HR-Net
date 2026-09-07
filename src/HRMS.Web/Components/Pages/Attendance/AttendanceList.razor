@@ -1,0 +1,80 @@
+@page "/attendance"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Attendance
+@inject IAttendanceService AttendanceService
+@rendermode InteractiveServer
+
+<PageTitle>Rekap Absensi</PageTitle>
+
+<h1>Rekap Absensi</h1>
+
+<div class="row g-2 mb-3 align-items-end" style="max-width: 500px;">
+    <div class="col-5">
+        <label class="form-label">Dari</label>
+        <input type="date" class="form-control" @bind="_fromDate" />
+    </div>
+    <div class="col-5">
+        <label class="form-label">Sampai</label>
+        <input type="date" class="form-control" @bind="_toDate" />
+    </div>
+    <div class="col-2">
+        <button class="btn btn-primary" @onclick="LoadAsync">Filter</button>
+    </div>
+</div>
+
+@if (_records is null)
+{
+    <p><em>Memuat...</em></p>
+}
+else if (_records.Count == 0)
+{
+    <p class="text-muted">Tidak ada data absensi pada rentang tanggal ini.</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Tanggal</th>
+                <th>Pegawai</th>
+                <th>Status</th>
+                <th>Jam Kerja</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _records)
+            {
+                <tr>
+                    <td>@r.AttendanceDate.ToString("dd MMM yyyy")</td>
+                    <td>@r.EmployeeName</td>
+                    <td><span class="badge bg-@StatusBadge(r.Status)">@r.Status</span></td>
+                    <td>@(r.WorkingHours.HasValue ? r.WorkingHours.Value.ToString(@"hh\:mm") : "-")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private DateTime _fromDate = DateTime.Today.AddDays(-7);
+    private DateTime _toDate = DateTime.Today;
+    private List<AttendanceRecordDto>? _records;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _records = await AttendanceService.GetAttendanceRecordsAsync(
+            null, DateOnly.FromDateTime(_fromDate), DateOnly.FromDateTime(_toDate));
+    }
+
+    private static string StatusBadge(HRMS.Domain.Enums.AttendanceStatus status) => status switch
+    {
+        HRMS.Domain.Enums.AttendanceStatus.Present => "success",
+        HRMS.Domain.Enums.AttendanceStatus.OnLeave => "info",
+        HRMS.Domain.Enums.AttendanceStatus.HalfDay => "warning",
+        HRMS.Domain.Enums.AttendanceStatus.WorkFromHome => "primary",
+        HRMS.Domain.Enums.AttendanceStatus.Holiday => "secondary",
+        _ => "danger"
+    };
+}

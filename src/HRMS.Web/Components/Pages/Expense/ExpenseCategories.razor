@@ -1,0 +1,81 @@
+@page "/expense-categories"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Expense
+@inject IExpenseCategoryService ExpenseCategoryService
+@rendermode InteractiveServer
+
+<PageTitle>Kategori Pengeluaran</PageTitle>
+
+<h1>Kategori Pengeluaran</h1>
+
+<div class="row">
+    <div class="col-md-6">
+        @if (_categories is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_categories.Count == 0)
+        {
+            <p class="text-muted">Belum ada kategori.</p>
+        }
+        else
+        {
+            <ul class="list-group" style="max-width: 400px;">
+                @foreach (var c in _categories)
+                {
+                    <li class="list-group-item">@c.Name</li>
+                }
+            </ul>
+        }
+    </div>
+
+    <div class="col-md-6">
+        <h5>Tambah Kategori</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        <EditForm Model="_model" OnValidSubmit="HandleSubmit" style="max-width: 400px;">
+            <div class="mb-2">
+                <InputText class="form-control" @bind-Value="_model.Name" placeholder="mis. Transportasi" />
+            </div>
+            <button class="btn btn-primary" type="submit" disabled="@_isSaving">Simpan</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private List<ExpenseCategoryDto>? _categories;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _categories = await ExpenseCategoryService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        var result = await ExpenseCategoryService.CreateAsync(new CreateExpenseCategoryRequest(_model.Name));
+
+        if (result.Succeeded)
+        {
+            _model.Name = string.Empty;
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string Name { get; set; } = string.Empty;
+    }
+}

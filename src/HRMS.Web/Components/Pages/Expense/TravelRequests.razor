@@ -1,0 +1,174 @@
+@page "/travel-requests"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using HRMS.Application.Expense
+@using HRMS.Application.Common.Interfaces
+@using HRMS.Domain.Entities.Employees
+@using HRMS.Domain.Enums
+@inject ITravelRequestService TravelRequestService
+@inject IUnitOfWork UnitOfWork
+@inject ICurrentUserService CurrentUser
+@rendermode InteractiveServer
+
+<PageTitle>Pengajuan Perjalanan Dinas</PageTitle>
+
+<h1>Perjalanan Dinas</h1>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success")">@_message</div>
+}
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_requests is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_requests.Count == 0)
+        {
+            <p class="text-muted">Belum ada pengajuan perjalanan dinas.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Pegawai</th><th>Tujuan</th><th>Tanggal</th><th>Estimasi Biaya</th><th>Status</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in _requests)
+                    {
+                        <tr>
+                            <td>@r.EmployeeName</td>
+                            <td>@r.Destination</td>
+                            <td>@r.FromDate.ToString("dd MMM") - @r.ToDate.ToString("dd MMM yyyy")</td>
+                            <td>@(r.EstimatedCost.HasValue ? $"Rp {r.EstimatedCost:N0}" : "-")</td>
+                            <td><span class="badge bg-@StatusBadge(r.Status)">@r.Status</span></td>
+                            <td>
+                                @if (r.Status == TravelRequestStatus.Pending)
+                                {
+                                    <button class="btn btn-sm btn-success" disabled="@(!CurrentUser.EmployeeId.HasValue)" @onclick="() => Approve(r.Id)">Setujui</button>
+                                    <button class="btn btn-sm btn-outline-danger" disabled="@(!CurrentUser.EmployeeId.HasValue)" @onclick="() => Reject(r.Id)">Tolak</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Ajukan Perjalanan Dinas</h5>
+        @if (_employees is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+                <div class="mb-2">
+                    <label class="form-label">Pegawai</label>
+                    <InputSelect class="form-select" @bind-Value="_model.EmployeeId">
+                        <option value="">-- Pilih --</option>
+                        @foreach (var e in _employees)
+                        {
+                            <option value="@e.Id">@e.FullName</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Tujuan</label>
+                    <InputText class="form-control" @bind-Value="_model.Destination" placeholder="mis. Surabaya" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Keperluan</label>
+                    <InputTextArea class="form-control" @bind-Value="_model.Purpose" rows="2" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Tanggal Berangkat</label>
+                    <InputDate class="form-control" @bind-Value="_model.FromDate" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Tanggal Pulang</label>
+                    <InputDate class="form-control" @bind-Value="_model.ToDate" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Estimasi Biaya (Rp, opsional)</label>
+                    <InputNumber class="form-control" @bind-Value="_model.EstimatedCost" />
+                </div>
+                <button class="btn btn-primary" type="submit" disabled="@_isSaving">Ajukan</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private List<TravelRequestDto>? _requests;
+    private List<Employee>? _employees;
+    private string? _message;
+    private bool _isError;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await UnitOfWork.Repository<Employee>().GetAllAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _requests = await TravelRequestService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+
+        if (!Guid.TryParse(_model.EmployeeId, out var employeeId))
+        {
+            _isError = true;
+            _message = "Pilih pegawai terlebih dahulu.";
+            _isSaving = false;
+            return;
+        }
+
+        var result = await TravelRequestService.CreateAsync(new CreateTravelRequestRequest(
+            employeeId, _model.Destination, _model.Purpose,
+            DateOnly.FromDateTime(_model.FromDate), DateOnly.FromDateTime(_model.ToDate), _model.EstimatedCost));
+
+        _isError = !result.Succeeded;
+        _message = result.Succeeded ? "Pengajuan perjalanan dinas terkirim." : string.Join(" ", result.Errors);
+
+        if (result.Succeeded)
+        {
+            _model.Destination = string.Empty;
+            _model.Purpose = null;
+            await LoadAsync();
+        }
+
+        _isSaving = false;
+    }
+
+    private async Task Approve(Guid id)
+    {
+        if (!CurrentUser.EmployeeId.HasValue) return;
+        await TravelRequestService.ApproveAsync(id, CurrentUser.EmployeeId.Value);
+        await LoadAsync();
+    }
+
+    private async Task Reject(Guid id)
+    {
+        if (!CurrentUser.EmployeeId.HasValue) return;
+        await TravelRequestService.RejectAsync(id, CurrentUser.EmployeeId.Value);
+        await LoadAsync();
+    }
+
+    private static string StatusBadge(TravelRequestStatus status) => status switch
+    {
+        TravelRequestStatus.Approved => "success",
+        TravelRequestStatus.Rejected => "danger",
+        _ => "warning"
+    };
+
+    private class FormModel
+    {
+        public string EmployeeId { get; set; } = string.Empty;
+        public string Destination { get; set; } = string.Empty;
+        public string? Purpose { get; set; }
+        public DateTime FromDate { get; set; } = DateTime.Today;
+        public DateTime ToDate { get; set; } = DateTime.Today.AddDays(3);
+        public decimal? EstimatedCost { get; set; }
+    }
+}

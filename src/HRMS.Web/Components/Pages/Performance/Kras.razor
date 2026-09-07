@@ -1,0 +1,95 @@
+@page "/kras"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator,HR Manager")]
+@using HRMS.Application.Performance
+@inject IKraService KraService
+@rendermode InteractiveServer
+
+<PageTitle>KRA</PageTitle>
+
+<h1>Key Result Area (KRA)</h1>
+<p class="text-muted">Kategori goal yang dipakai berulang di berbagai siklus penilaian (mis. "Kualitas Kerja", "Pencapaian Target").</p>
+
+<div class="row">
+    <div class="col-md-7">
+        @if (_kras is null)
+        {
+            <p><em>Memuat...</em></p>
+        }
+        else if (_kras.Count == 0)
+        {
+            <p class="text-muted">Belum ada KRA.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead><tr><th>Judul</th><th>Deskripsi</th></tr></thead>
+                <tbody>
+                    @foreach (var k in _kras)
+                    {
+                        <tr>
+                            <td>@k.Title</td>
+                            <td>@k.Description</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="col-md-5">
+        <h5>Tambah KRA</h5>
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger">@_errorMessage</div>
+        }
+        <EditForm Model="_model" OnValidSubmit="HandleSubmit">
+            <div class="mb-2">
+                <label class="form-label">Judul</label>
+                <InputText class="form-control" @bind-Value="_model.Title" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Deskripsi</label>
+                <InputTextArea class="form-control" @bind-Value="_model.Description" rows="3" />
+            </div>
+            <button class="btn btn-primary" type="submit" disabled="@_isSaving">Simpan</button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private List<KraDto>? _kras;
+    private string? _errorMessage;
+    private bool _isSaving;
+    private readonly FormModel _model = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() => _kras = await KraService.GetAllAsync();
+
+    private async Task HandleSubmit()
+    {
+        _isSaving = true;
+        _errorMessage = null;
+
+        var result = await KraService.CreateAsync(new CreateKraRequest(_model.Title, _model.Description));
+
+        if (result.Succeeded)
+        {
+            _model.Title = string.Empty;
+            _model.Description = null;
+            await LoadAsync();
+        }
+        else
+        {
+            _errorMessage = string.Join(" ", result.Errors);
+        }
+
+        _isSaving = false;
+    }
+
+    private class FormModel
+    {
+        public string Title { get; set; } = string.Empty;
+        public string? Description { get; set; }
+    }
+}
