@@ -9,11 +9,11 @@
     <div style="max-width: 420px; width: 100%;">
         <h1 class="mb-4">Masuk</h1>
 
-        @if (HttpContext?.Request.Query["error"] == "1")
+        @if (HttpContext?.Request.Query["error"].ToString() == "1")
         {
             <div class="alert alert-danger">Email atau password salah.</div>
         }
-        @if (HttpContext?.Request.Query["error"] == "tenant_inactive")
+        @if (HttpContext?.Request.Query["error"].ToString() == "tenant_inactive")
         {
             <div class="alert alert-danger">Akun perusahaan Anda sedang tidak aktif. Hubungi administrator.</div>
         }
